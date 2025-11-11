@@ -1,0 +1,55 @@
+{
+  "name": "weather-mcp-analytics-server",
+  "version": "1.0.0",
+  "description": "Privacy-first analytics collection server for Weather MCP",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/api/index.ts",
+    "dev:worker": "tsx watch src/worker/index.ts",
+    "build": "tsc",
+    "start": "node dist/api/index.js",
+    "start:worker": "node dist/worker/index.js",
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "db:init": "psql -U analytics -d analytics -f init.sql",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "keywords": [
+    "analytics",
+    "privacy",
+    "timescaledb",
+    "weather-mcp"
+  ],
+  "author": "Dan Gahagan",
+  "license": "MIT",
+  "dependencies": {
+    "fastify": "^4.28.0",
+    "ioredis": "^5.4.1",
+    "pg": "^8.12.0",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "@typescript-eslint/eslint-plugin": "^7.13.0",
+    "@typescript-eslint/parser": "^7.13.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.2",
+    "tsx": "^4.15.7",
+    "typescript": "^5.5.2",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
