@@ -13,6 +13,7 @@ import {
   getErrorStats,
   getPerformanceStats,
 } from './stats.js';
+import { register, recordHttpRequest, updateConnectionPoolMetrics, queueDepth as queueDepthGauge, recordEventReceived } from '../monitoring/metrics.js';
 import type { EventBatchRequest, EventBatchResponse, ErrorResponse } from '../types/events.js';
 
 // Create Fastify instance
@@ -81,6 +82,12 @@ server.addHook('onResponse', async (request, reply) => {
     statusCode: reply.statusCode,
     responseTime: `${responseTime.toFixed(2)}ms`,
   }, 'Request completed');
+
+  // Record metrics (skip /metrics and /v1/health endpoints)
+  if (!request.url.includes('/metrics') && !request.url.includes('/v1/health')) {
+    const route = request.routeOptions?.url || request.url;
+    recordHttpRequest(request.method, route, reply.statusCode, responseTime / 1000);
+  }
 });
 
 // Error handler
@@ -105,6 +112,29 @@ server.setErrorHandler((error, request, reply) => {
 // =============================================================================
 // ROUTES
 // =============================================================================
+
+// Prometheus metrics endpoint (no rate limit)
+server.get('/metrics', async (_request, reply) => {
+  try {
+    // Update dynamic metrics before returning
+    const dbStats = await getDatabaseStats();
+    updateConnectionPoolMetrics({
+      total: dbStats.total_connections,
+      idle: dbStats.idle_connections,
+      waiting: dbStats.waiting_count,
+    });
+
+    const currentQueueDepth = await getQueueDepth();
+    queueDepthGauge.set(currentQueueDepth);
+
+    reply.header('Content-Type', register.contentType);
+    return register.metrics();
+  } catch (error) {
+    logger.error({ error }, 'Failed to generate metrics');
+    reply.status(500);
+    return { error: 'Failed to generate metrics' };
+  }
+});
 
 // Health check endpoint (no rate limit)
 server.get('/v1/health', async (_request, reply) => {
@@ -303,6 +333,11 @@ server.post<{
         retry_after: 60,
       } as ErrorResponse;
     }
+
+    // Record metrics
+    events.forEach((event) => {
+      recordEventReceived(event.analytics_level, event.tool);
+    });
 
     logger.info({
       reqId: request.id,
