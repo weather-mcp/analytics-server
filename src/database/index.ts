@@ -1,7 +1,7 @@
-import { Pool, PoolClient, QueryResult } from 'pg';
+import { Pool } from 'pg';
 import { config } from '../config.js';
 import { dbLogger as logger } from '../utils/logger.js';
-import type { EventRecord, AnalyticsEvent } from '../types/events.js';
+import type { AnalyticsEvent } from '../types/events.js';
 
 // Create connection pool
 export const pool = new Pool({
@@ -19,15 +19,15 @@ export const pool = new Pool({
 });
 
 // Pool event listeners
-pool.on('connect', (client) => {
+pool.on('connect', () => {
   logger.debug('New database client connected');
 });
 
-pool.on('error', (err, client) => {
+pool.on('error', (err) => {
   logger.error({ err }, 'Unexpected error on idle database client');
 });
 
-pool.on('remove', (client) => {
+pool.on('remove', () => {
   logger.debug('Database client removed from pool');
 });
 

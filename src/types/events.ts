@@ -15,7 +15,11 @@ export interface MinimalEvent {
 }
 
 // Standard level event (includes performance metrics)
-export interface StandardEvent extends MinimalEvent {
+export interface StandardEvent {
+  version: string;
+  tool: string;
+  status: EventStatus;
+  timestamp_hour: string; // ISO 8601 datetime string
   analytics_level: 'standard';
   response_time_ms?: number;
   service?: ServiceType;
@@ -26,8 +30,18 @@ export interface StandardEvent extends MinimalEvent {
 }
 
 // Detailed level event (includes session tracking)
-export interface DetailedEvent extends StandardEvent {
+export interface DetailedEvent {
+  version: string;
+  tool: string;
+  status: EventStatus;
+  timestamp_hour: string; // ISO 8601 datetime string
   analytics_level: 'detailed';
+  response_time_ms?: number;
+  service?: ServiceType;
+  cache_hit?: boolean;
+  retry_count?: number;
+  country?: string; // ISO 3166-1 alpha-2
+  error_type?: string; // Only present if status is 'error'
   parameters?: Record<string, unknown>; // Anonymized parameters
   session_id?: string; // Hashed session identifier
   sequence_number?: number;

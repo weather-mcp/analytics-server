@@ -6,6 +6,13 @@ import { apiLogger as logger } from '../utils/logger.js';
 import { validateEventBatch } from './validation.js';
 import { pool, checkDatabaseHealth, getDatabaseStats } from '../database/index.js';
 import { queueEvents, getQueueDepth } from '../queue/index.js';
+import {
+  getStatsOverview,
+  getToolsStats,
+  getToolStats,
+  getErrorStats,
+  getPerformanceStats,
+} from './stats.js';
 import type { EventBatchRequest, EventBatchResponse, ErrorResponse } from '../types/events.js';
 
 // Create Fastify instance
@@ -45,7 +52,7 @@ await server.register(rateLimit, {
     'x-ratelimit-remaining': true,
     'x-ratelimit-reset': true,
   },
-  errorResponseBuilder: (request, context) => {
+  errorResponseBuilder: (_request, context) => {
     return {
       error: 'rate_limit_exceeded',
       message: 'Too many requests, please try again later',
@@ -55,7 +62,7 @@ await server.register(rateLimit, {
 });
 
 // Custom request logging hook
-server.addHook('onRequest', async (request, reply) => {
+server.addHook('onRequest', async (request) => {
   logger.info({
     reqId: request.id,
     method: request.method,
@@ -100,7 +107,7 @@ server.setErrorHandler((error, request, reply) => {
 // =============================================================================
 
 // Health check endpoint (no rate limit)
-server.get('/v1/health', async (request, reply) => {
+server.get('/v1/health', async (_request, reply) => {
   const isHealthy = await checkDatabaseHealth();
 
   if (!isHealthy) {
@@ -119,7 +126,7 @@ server.get('/v1/health', async (request, reply) => {
 });
 
 // Status endpoint (detailed system status)
-server.get('/v1/status', async (request, reply) => {
+server.get('/v1/status', async (_request, reply) => {
   try {
     const [dbHealthy, dbStats, queueDepth] = await Promise.all([
       checkDatabaseHealth(),
@@ -154,6 +161,115 @@ server.get('/v1/status', async (request, reply) => {
     };
   }
 });
+
+// =============================================================================
+// STATS API ENDPOINTS
+// =============================================================================
+
+// Get overview statistics
+server.get<{
+  Querystring: { period?: string };
+}>('/v1/stats/overview', async (request, reply) => {
+  try {
+    const { period = '30d' } = request.query;
+    const stats = await getStatsOverview(period);
+    return stats;
+  } catch (error: any) {
+    logger.error({ error, reqId: request.id }, 'Failed to get stats overview');
+    reply.status(400);
+    return {
+      error: 'invalid_request',
+      details: error.message || 'Failed to retrieve statistics',
+    } as ErrorResponse;
+  }
+});
+
+// Get all tools statistics
+server.get<{
+  Querystring: { period?: string };
+}>('/v1/stats/tools', async (request, reply) => {
+  try {
+    const { period = '30d' } = request.query;
+    const tools = await getToolsStats(period);
+    return { period, tools };
+  } catch (error: any) {
+    logger.error({ error, reqId: request.id }, 'Failed to get tools stats');
+    reply.status(400);
+    return {
+      error: 'invalid_request',
+      details: error.message || 'Failed to retrieve tool statistics',
+    } as ErrorResponse;
+  }
+});
+
+// Get specific tool statistics
+server.get<{
+  Params: { toolName: string };
+  Querystring: { period?: string };
+}>('/v1/stats/tool/:toolName', async (request, reply) => {
+  try {
+    const { toolName } = request.params;
+    const { period = '30d' } = request.query;
+    const stats = await getToolStats(toolName, period);
+
+    if (!stats) {
+      reply.status(404);
+      return {
+        error: 'not_found',
+        details: `Tool '${toolName}' not found or has no data`,
+      } as ErrorResponse;
+    }
+
+    return stats;
+  } catch (error: any) {
+    logger.error({ error, reqId: request.id }, 'Failed to get tool stats');
+    reply.status(400);
+    return {
+      error: 'invalid_request',
+      details: error.message || 'Failed to retrieve tool statistics',
+    } as ErrorResponse;
+  }
+});
+
+// Get error statistics
+server.get<{
+  Querystring: { period?: string };
+}>('/v1/stats/errors', async (request, reply) => {
+  try {
+    const { period = '30d' } = request.query;
+    const errors = await getErrorStats(period);
+    return { period, errors };
+  } catch (error: any) {
+    logger.error({ error, reqId: request.id }, 'Failed to get error stats');
+    reply.status(400);
+    return {
+      error: 'invalid_request',
+      details: error.message || 'Failed to retrieve error statistics',
+    } as ErrorResponse;
+  }
+});
+
+// Get performance statistics
+server.get<{
+  Querystring: { period?: string };
+}>('/v1/stats/performance', async (request, reply) => {
+  try {
+    const { period = '30d' } = request.query;
+    const stats = await getPerformanceStats(period);
+    return stats;
+  } catch (error: any) {
+    logger.error({ error, reqId: request.id }, 'Failed to get performance stats');
+    reply.status(400);
+    return {
+      error: 'invalid_request',
+      details: error.message || 'Failed to retrieve performance statistics',
+    } as ErrorResponse;
+  }
+});
+
+// =============================================================================
+// EVENT INGESTION ENDPOINT
+// =============================================================================
 
 // Event ingestion endpoint
 server.post<{
