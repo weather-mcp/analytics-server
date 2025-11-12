@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: analytics-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-analytics}
+      POSTGRES_USER: ${DB_USER:-analytics}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-analytics}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: analytics-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: analytics-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-analytics}
+      DB_USER: ${DB_USER:-analytics}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB:-0}
+      QUEUE_KEY: ${QUEUE_KEY:-analytics:events}
+      MAX_QUEUE_SIZE: ${MAX_QUEUE_SIZE:-10000}
+      API_BODY_LIMIT_KB: ${API_BODY_LIMIT_KB:-100}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      MAX_BATCH_SIZE: ${MAX_BATCH_SIZE:-100}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    command: ["node", "dist/api/index.js"]
+
+  # Worker Process
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: analytics-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-analytics}
+      DB_USER: ${DB_USER:-analytics}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB:-0}
+      QUEUE_KEY: ${QUEUE_KEY:-analytics:events}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-1000}
+      WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE:-50}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+    command: ["node", "dist/worker/index.js"]
+
+  # Dashboard (optional - for local testing)
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: analytics-dashboard
+    depends_on:
+      - api
+    environment:
+      VITE_API_URL: http://localhost:3000
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: analytics-network
