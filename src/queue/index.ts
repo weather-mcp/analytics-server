@@ -51,6 +51,25 @@ redis.on('reconnecting', () => {
 const QUEUE_KEY = config.queue.key;
 const MAX_QUEUE_SIZE = config.queue.maxSize;
 
+// Lua script for atomic size check + push
+// Returns 1 on success, 0 if queue is full
+const ATOMIC_PUSH_SCRIPT = `
+  local queue_key = KEYS[1]
+  local max_size = tonumber(ARGV[1])
+  local current_size = redis.call('LLEN', queue_key)
+
+  if current_size >= max_size then
+    return 0
+  end
+
+  -- Push all remaining arguments to the queue
+  for i = 2, #ARGV do
+    redis.call('RPUSH', queue_key, ARGV[i])
+  end
+
+  return 1
+`;
+
 /**
  * Queue events for async processing
  * Throws error if queue is full
@@ -62,10 +81,20 @@ export async function queueEvents(events: AnalyticsEvent[]): Promise<void> {
   }
 
   try {
-    // Check current queue size
-    const currentSize = await redis.llen(QUEUE_KEY);
+    // Serialize events to JSON strings
+    const serialized = events.map((event) => JSON.stringify(event));
 
-    if (currentSize >= MAX_QUEUE_SIZE) {
+    // Use Lua script for atomic size check + push
+    const result = await redis.eval(
+      ATOMIC_PUSH_SCRIPT,
+      1,
+      QUEUE_KEY,
+      MAX_QUEUE_SIZE.toString(),
+      ...serialized
+    );
+
+    if (result === 0) {
+      const currentSize = await redis.llen(QUEUE_KEY);
       logger.error({
         currentSize,
         maxSize: MAX_QUEUE_SIZE,
@@ -74,15 +103,10 @@ export async function queueEvents(events: AnalyticsEvent[]): Promise<void> {
       throw new Error('Queue full, please retry later');
     }
 
-    // Serialize events to JSON strings
-    const serialized = events.map((event) => JSON.stringify(event));
-
-    // Push to queue (right push - FIFO when using left pop)
-    await redis.rpush(QUEUE_KEY, ...serialized);
-
+    const currentSize = await redis.llen(QUEUE_KEY);
     logger.debug({
       count: events.length,
-      queueDepth: currentSize + events.length,
+      queueDepth: currentSize,
     }, 'Events queued successfully');
 
   } catch (error) {

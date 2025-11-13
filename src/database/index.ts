@@ -75,35 +75,46 @@ export async function insertEvents(events: AnalyticsEvent[]): Promise<void> {
   try {
     await client.query('BEGIN');
 
-    const insertPromises = events.map((event) => {
-      return client.query(
-        `INSERT INTO events (
-          timestamp_hour, version, tool, status, analytics_level,
-          response_time_ms, service, cache_hit, retry_count, country,
-          parameters, session_id, sequence_number, error_type
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-        )`,
-        [
-          event.timestamp_hour,
-          event.version,
-          event.tool,
-          event.status,
-          event.analytics_level,
-          'response_time_ms' in event ? event.response_time_ms ?? null : null,
-          'service' in event ? event.service ?? null : null,
-          'cache_hit' in event ? event.cache_hit ?? null : null,
-          'retry_count' in event ? event.retry_count ?? null : null,
-          'country' in event ? event.country ?? null : null,
-          'parameters' in event ? JSON.stringify(event.parameters) ?? null : null,
-          'session_id' in event ? event.session_id ?? null : null,
-          'sequence_number' in event ? event.sequence_number ?? null : null,
-          'error_type' in event ? event.error_type ?? null : null,
-        ]
+    // Build multi-row INSERT for better performance
+    // Reduces round-trips from N to 1
+    const values: unknown[] = [];
+    const valuesClauses: string[] = [];
+
+    events.forEach((event, index) => {
+      const baseIndex = index * 14;
+      valuesClauses.push(
+        `($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5}, ` +
+        `$${baseIndex + 6}, $${baseIndex + 7}, $${baseIndex + 8}, $${baseIndex + 9}, $${baseIndex + 10}, ` +
+        `$${baseIndex + 11}, $${baseIndex + 12}, $${baseIndex + 13}, $${baseIndex + 14})`
+      );
+
+      values.push(
+        event.timestamp_hour,
+        event.version,
+        event.tool,
+        event.status,
+        event.analytics_level,
+        'response_time_ms' in event ? event.response_time_ms ?? null : null,
+        'service' in event ? event.service ?? null : null,
+        'cache_hit' in event ? event.cache_hit ?? null : null,
+        'retry_count' in event ? event.retry_count ?? null : null,
+        'country' in event ? event.country ?? null : null,
+        'parameters' in event ? JSON.stringify(event.parameters) ?? null : null,
+        'session_id' in event ? event.session_id ?? null : null,
+        'sequence_number' in event ? event.sequence_number ?? null : null,
+        'error_type' in event ? event.error_type ?? null : null
       );
     });
 
-    await Promise.all(insertPromises);
+    const query = `
+      INSERT INTO events (
+        timestamp_hour, version, tool, status, analytics_level,
+        response_time_ms, service, cache_hit, retry_count, country,
+        parameters, session_id, sequence_number, error_type
+      ) VALUES ${valuesClauses.join(', ')}
+    `;
+
+    await client.query(query, values);
     await client.query('COMMIT');
 
     logger.info({ count: events.length }, 'Events inserted successfully');

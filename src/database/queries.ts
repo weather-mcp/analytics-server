@@ -166,17 +166,19 @@ export async function getOverviewStats(period: string): Promise<OverviewStats> {
   try {
     const range = parsePeriod(period);
 
-    // Query summary statistics from hourly aggregations
+    // Query summary statistics from raw events for accurate aggregation
+    // Computing from raw data prevents incorrect averaging of averages
     const summaryQuery = `
       SELECT
         COUNT(DISTINCT version) as unique_versions,
-        SUM(total_calls) as total_calls,
-        SUM(success_calls) as success_calls,
-        SUM(error_calls) as error_calls,
-        AVG(avg_response_time_ms) as avg_response_time_ms,
-        AVG(cache_hit_rate) as avg_cache_hit_rate
-      FROM hourly_aggregations
-      WHERE hour >= $1 AND hour <= $2
+        COUNT(*) as total_calls,
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_calls,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_calls,
+        AVG(response_time_ms) FILTER (WHERE response_time_ms IS NOT NULL) as avg_response_time_ms,
+        SUM(CASE WHEN cache_hit = true THEN 1 ELSE 0 END)::FLOAT /
+          NULLIF(SUM(CASE WHEN cache_hit IS NOT NULL THEN 1 ELSE 0 END), 0) as avg_cache_hit_rate
+      FROM events
+      WHERE timestamp_hour >= $1 AND timestamp_hour <= $2
     `;
 
     const summaryResult = await pool.query(summaryQuery, [range.start, range.end]);
@@ -210,15 +212,15 @@ export async function getOverviewStats(period: string): Promise<OverviewStats> {
     // Estimate active installs (unique versions is a proxy)
     const activeInstalls = safeParseInt(summary.unique_versions, 0) * 5; // Rough estimate
 
-    // Query tool summaries
+    // Query tool summaries from raw events for accurate aggregation
     const toolsQuery = `
       SELECT
         tool as name,
-        SUM(total_calls) as calls,
-        SUM(success_calls) as success_calls,
-        AVG(avg_response_time_ms) as avg_response_time_ms
-      FROM hourly_aggregations
-      WHERE hour >= $1 AND hour <= $2
+        COUNT(*) as calls,
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_calls,
+        AVG(response_time_ms) FILTER (WHERE response_time_ms IS NOT NULL) as avg_response_time_ms
+      FROM events
+      WHERE timestamp_hour >= $1 AND timestamp_hour <= $2
       GROUP BY tool
       ORDER BY calls DESC
     `;

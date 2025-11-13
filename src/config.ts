@@ -92,8 +92,8 @@ export const config = {
 
   // Security
   security: {
-    trustProxy: getEnvBool('TRUST_PROXY', true),
-    corsOrigin: getEnvVar('CORS_ORIGIN', '*'),
+    trustProxy: getEnvBool('TRUST_PROXY', false),
+    corsOrigin: getEnvVar('CORS_ORIGIN', 'https://weather-mcp.dev,https://analytics.weather-mcp.dev'),
   },
 
   // Data Retention

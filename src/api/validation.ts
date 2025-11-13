@@ -93,43 +93,69 @@ const PII_FIELDS = [
 ];
 
 /**
- * Check if an event contains PII (Personally Identifiable Information)
- * Returns true if PII is detected, false otherwise
- *
- * Uses constant-time checking to prevent timing attacks that could
- * reveal which PII fields are being checked.
+ * Recursively check if an object contains PII fields
+ * Depth-limited to prevent excessive recursion
  */
-function hasPII(event: unknown): boolean {
-  if (typeof event !== 'object' || event === null) {
+function checkObjectForPII(obj: unknown, path: string = '', depth: number = 0, detectedFields: string[] = []): boolean {
+  // Limit recursion depth to prevent DoS
+  const MAX_DEPTH = 10;
+  if (depth > MAX_DEPTH) {
     return false;
   }
 
-  const eventObj = event as Record<string, unknown>;
-  let hasPIIFound = false;
-  const detectedFields: string[] = [];
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
 
-  // Check all top-level fields (constant-time - check all fields even if one matches)
+  let hasPIIFound = false;
+  const objRecord = obj as Record<string, unknown>;
+
+  // Check all fields in this object
   for (const field of PII_FIELDS) {
-    if (field in eventObj) {
-      detectedFields.push(field);
+    if (field in objRecord) {
+      const fieldPath = path ? `${path}.${field}` : field;
+      detectedFields.push(fieldPath);
       hasPIIFound = true;
       // Don't return early - continue checking all fields
     }
   }
 
-  // Check parameters field if it exists
-  if ('parameters' in eventObj && typeof eventObj.parameters === 'object' && eventObj.parameters !== null) {
-    const params = eventObj.parameters as Record<string, unknown>;
-    for (const field of PII_FIELDS) {
-      if (field in params) {
-        detectedFields.push(`parameters.${field}`);
-        hasPIIFound = true;
-        // Don't return early - continue checking all fields
+  // Recursively check nested objects and arrays
+  for (const [key, value] of Object.entries(objRecord)) {
+    const fieldPath = path ? `${path}.${key}` : key;
+
+    if (typeof value === 'object' && value !== null) {
+      if (Array.isArray(value)) {
+        // Check each element in the array
+        for (let i = 0; i < value.length; i++) {
+          if (checkObjectForPII(value[i], `${fieldPath}[${i}]`, depth + 1, detectedFields)) {
+            hasPIIFound = true;
+          }
+        }
+      } else {
+        // Recursively check nested object
+        if (checkObjectForPII(value, fieldPath, depth + 1, detectedFields)) {
+          hasPIIFound = true;
+        }
       }
     }
   }
 
-  // Log after all checks complete (still constant time per event)
+  return hasPIIFound;
+}
+
+/**
+ * Check if an event contains PII (Personally Identifiable Information)
+ * Returns true if PII is detected, false otherwise
+ *
+ * Uses recursive depth-limited checking to find PII at any nesting level.
+ * Still maintains constant-time per field to prevent timing attacks.
+ */
+function hasPII(event: unknown): boolean {
+  const detectedFields: string[] = [];
+  const hasPIIFound = checkObjectForPII(event, '', 0, detectedFields);
+
+  // Log after all checks complete
   if (hasPIIFound) {
     logger.warn({ fields: detectedFields }, 'PII fields detected in event');
   }

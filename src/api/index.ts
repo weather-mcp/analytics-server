@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { apiLogger as logger } from '../utils/logger.js';
 import { validateEventBatch } from './validation.js';
 import { pool, checkDatabaseHealth, getDatabaseStats } from '../database/index.js';
-import { queueEvents, getQueueDepth } from '../queue/index.js';
+import { queueEvents, getQueueDepth, redis } from '../queue/index.js';
 import {
   getToolsStats,
   getToolStats,
@@ -48,7 +48,7 @@ await server.register(rateLimit, {
   ban: 3, // Ban after 3 violations
   cache: 10000, // Keep track of 10k IPs
   allowList: [], // No allowlist by default
-  redis: undefined, // Use in-memory store for now
+  redis: redis, // Use Redis for multi-instance support
   skipOnError: false,
   addHeadersOnExceeding: {
     'x-ratelimit-limit': true,
