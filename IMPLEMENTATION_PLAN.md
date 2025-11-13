@@ -1,6 +1,6 @@
 # Analytics Server - Detailed Implementation Plan
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2025-11-13 (Updated)
 **Status:** Development Phase - Testing Complete, Deployment Pending
 **Estimated Timeline:** 6-8 weeks (Week 6 - Testing Phase Complete)
@@ -25,6 +25,60 @@
 
 ---
 
+## Project Architecture Context
+
+This analytics server is part of the **Weather MCP multi-project ecosystem**:
+
+### Project Roles
+
+1. **Analytics Server** (this project)
+   - Backend API for privacy-first analytics collection
+   - PostgreSQL + TimescaleDB for data storage
+   - Redis queue for async event processing
+   - Exposes REST API endpoints at `/v1/stats/*`
+   - **Purpose:** Data collection, storage, and API serving
+
+2. **Website** (`/home/dgahagan/work/personal/weather-mcp/website/`)
+   - Public-facing Next.js website
+   - Dashboard UI with interactive charts (Recharts)
+   - Consumes analytics-server API endpoints
+   - **Purpose:** Public analytics dashboard visualization
+
+3. **Weather MCP Server** (`/home/dgahagan/work/personal/weather-mcp/weather-mcp/`)
+   - Main MCP server providing weather tools
+   - Optionally sends anonymous analytics events to analytics-server
+   - **Purpose:** Core product that generates analytics data
+
+### Data Flow
+
+```
+Weather MCP Clients (users)
+    ↓
+    | (anonymous events)
+    ↓
+Analytics Server API (/v1/events)
+    ↓
+    | (stores in PostgreSQL)
+    ↓
+Analytics Server API (/v1/stats/*)
+    ↓
+    | (consumed by)
+    ↓
+Website Dashboard (weather-mcp.dev)
+    ↓
+    | (displays to)
+    ↓
+Public Users
+```
+
+### Important Architectural Notes
+
+- **No Frontend in This Project:** Phase 5 describes website integration, NOT building a React frontend here
+- **Grafana is Internal Only:** Phase 7 Grafana dashboards are for operational monitoring (API health, queue metrics, database performance), NOT for public product analytics
+- **Public Analytics Visualization:** Handled by the website project's dashboard pages
+
+---
+
 ## Implementation Phases Overview
 
 ### Timeline Breakdown
@@ -36,9 +90,9 @@
 | **Phase 2: API & Validation** | 3-4 days | Event ingestion endpoint | Critical |
 | **Phase 3: Queue & Worker** | 3-4 days | Async processing pipeline | Critical |
 | **Phase 4: Dashboard API** | 2-3 days | Public stats endpoints | High |
-| **Phase 5: Frontend Dashboard** | 5-7 days | Public dashboard UI | High |
+| **Phase 5: Website Integration** | 2-3 days | API docs, CORS, integration testing | High |
 | **Phase 6: Deployment** | 2-3 days | Production infrastructure | Critical |
-| **Phase 7: Monitoring** | 2-3 days | Observability setup | High |
+| **Phase 7: Monitoring** | 2-3 days | Operational observability | High |
 | **Phase 8: Testing** | 3-5 days | Comprehensive test suite | Critical ✅ **COMPLETED** |
 | **Phase 9: Launch Prep** | 2-3 days | Final checks, documentation | Critical |
 
@@ -742,177 +796,108 @@
 
 ---
 
-## Phase 5: Frontend Dashboard
-**Duration:** 5-7 days
+## Phase 5: Website Integration
+**Duration:** 2-3 days
 **Priority:** High
 **Dependencies:** Phase 4
+**Note:** Public dashboard UI is built in separate `website` project
 
 ### Goals
-- Build public dashboard UI
-- Create interactive charts
-- Display real-time statistics
-- Ensure mobile responsiveness
+- Integrate analytics API with website project
+- Ensure API compatibility with dashboard requirements
+- Document API endpoints for frontend consumption
+- Test cross-origin requests and CORS
 
 ### Tasks
 
-#### 5.1 Frontend Setup
-- [ ] **5.1.1** Initialize React project
-  - Create React app with Vite
-  - TypeScript configuration
-  - Tailwind CSS setup
+#### 5.1 API Documentation for Website Integration
+- [ ] **5.1.1** Document all API endpoints
+  - OpenAPI/Swagger specification
+  - Request/response schemas
+  - Example requests and responses
+  - Error response formats
+  - **Estimated Time:** 3 hours
+
+- [ ] **5.1.2** Create API integration guide
+  - Base URL configuration
+  - Authentication (if needed)
+  - Rate limiting considerations
+  - CORS configuration
   - **Estimated Time:** 2 hours
 
-- [ ] **5.1.2** Set up routing
-  - React Router configuration
-  - Route definitions
+- [ ] **5.1.3** Provide TypeScript types for API responses
+  - Export shared types
+  - Document in separate types package or README
   - **Estimated Time:** 1 hour
 
-- [ ] **5.1.3** Configure API client
-  - Fetch/axios setup
-  - API base URL configuration
-  - Error handling
+#### 5.2 CORS Configuration
+- [ ] **5.2.1** Configure CORS for website domain
+  - Allow weather-mcp.dev origin
+  - Allow localhost for development
+  - Configure allowed methods (GET)
+  - Configure allowed headers
+  - **Estimated Time:** 1 hour
+
+- [ ] **5.2.2** Test CORS from website project
+  - Test from localhost:3000 (development)
+  - Test from weather-mcp.dev (production)
+  - Verify preflight requests
+  - **Estimated Time:** 1 hour
+
+#### 5.3 API Response Optimization for Frontend
+- [ ] **5.3.1** Verify response formats match frontend needs
+  - Check all stats endpoints return expected data
+  - Ensure proper JSON formatting
+  - Add any missing fields identified by frontend
   - **Estimated Time:** 2 hours
 
-#### 5.2 Dashboard Components
-- [ ] **5.2.1** Create layout components
-  - Header with title and navigation
-  - Footer with links
-  - Responsive container
+- [ ] **5.3.2** Optimize response sizes
+  - Remove unnecessary fields
+  - Compress responses (gzip)
+  - Consider pagination for large datasets
+  - **Estimated Time:** 2 hours
+
+#### 5.4 Integration Testing with Website
+- [ ] **5.4.1** Test API calls from website project
+  - Test all /v1/stats/* endpoints
+  - Test error handling
+  - Test caching behavior
   - **Estimated Time:** 3 hours
 
-- [ ] **5.2.2** Create Overview section
-  - Summary cards (total calls, success rate, etc.)
-  - Key metrics display
-  - Time period selector
-  - **Estimated Time:** 4 hours
-
-- [ ] **5.2.3** Create Tool Usage section
-  - Tool list with stats
-  - Bar chart of tool popularity
-  - Success rate indicators
-  - **Estimated Time:** 4 hours
-
-- [ ] **5.2.4** Create Performance section
-  - Response time charts
-  - Cache hit rate display
-  - Service distribution pie chart
-  - **Estimated Time:** 4 hours
-
-- [ ] **5.2.5** Create Errors section
-  - Error type breakdown
-  - Error frequency chart
-  - Trend indicators
-  - **Estimated Time:** 4 hours
-
-- [ ] **5.2.6** Create Geographic section
-  - World map with country-level data
-  - Country list with stats
-  - **Estimated Time:** 5 hours
-
-#### 5.3 Data Visualization
-- [ ] **5.3.1** Integrate charting library (Recharts or Chart.js)
-  - Install and configure
-  - Create chart components
+- [ ] **5.4.2** Performance testing
+  - Test response times from frontend
+  - Test concurrent requests
+  - Verify cache hit rates
   - **Estimated Time:** 2 hours
 
-- [ ] **5.3.2** Create line charts
-  - Time-series data
-  - Multiple series support
-  - Tooltips and legends
-  - **Estimated Time:** 3 hours
-
-- [ ] **5.3.3** Create bar charts
-  - Tool usage comparison
-  - Error type comparison
+#### 5.5 Deployment Coordination
+- [ ] **5.5.1** Coordinate deployment with website
+  - Ensure API is deployed before website update
+  - Verify website can reach API endpoint
+  - Test in staging environment first
   - **Estimated Time:** 2 hours
 
-- [ ] **5.3.4** Create pie charts
-  - Service distribution
-  - Success/error ratio
-  - **Estimated Time:** 2 hours
-
-#### 5.4 Real-time Updates
-- [ ] **5.4.1** Implement polling mechanism
-  - Auto-refresh every 30 seconds
-  - User can pause/resume
-  - **Estimated Time:** 2 hours
-
-- [ ] **5.4.2** Add loading states
-  - Skeleton screens
-  - Loading indicators
-  - **Estimated Time:** 2 hours
-
-- [ ] **5.4.3** Add error states
-  - Error messages
-  - Retry buttons
-  - Offline detection
-  - **Estimated Time:** 2 hours
-
-#### 5.5 Responsive Design
-- [ ] **5.5.1** Mobile optimization
-  - Responsive layout
-  - Touch-friendly interactions
-  - Mobile navigation
-  - **Estimated Time:** 4 hours
-
-- [ ] **5.5.2** Tablet optimization
-  - Adjusted layout for medium screens
-  - **Estimated Time:** 2 hours
-
-- [ ] **5.5.3** Desktop optimization
-  - Multi-column layouts
-  - Larger charts
-  - **Estimated Time:** 2 hours
-
-#### 5.6 Dashboard Testing
-- [ ] **5.6.1** Component unit tests
-  - Test all components
-  - Mock API calls
-  - **Estimated Time:** 4 hours
-
-- [ ] **5.6.2** Integration tests
-  - Test data flow
-  - Test user interactions
-  - **Estimated Time:** 3 hours
-
-- [ ] **5.6.3** Visual regression tests
-  - Screenshot comparison
-  - Cross-browser testing
-  - **Estimated Time:** 3 hours
-
-- [ ] **5.6.4** Accessibility testing
-  - WCAG 2.1 AA compliance
-  - Screen reader testing
-  - Keyboard navigation
-  - **Estimated Time:** 3 hours
-
-#### 5.7 Build & Deployment
-- [ ] **5.7.1** Configure production build
-  - Minification
-  - Code splitting
-  - Asset optimization
-  - **Estimated Time:** 2 hours
-
-- [ ] **5.7.2** Set up static file serving
-  - Integrate with Nginx
-  - Cache headers
-  - Compression
+- [ ] **5.5.2** Set up monitoring for cross-project integration
+  - Monitor API calls from website
+  - Track frontend error rates
+  - Alert on integration failures
   - **Estimated Time:** 2 hours
 
 ### Success Criteria
-- [x] Dashboard displays all stats correctly
-- [x] Charts are interactive and responsive
-- [x] Auto-refresh works correctly
-- [x] Mobile-friendly design
-- [x] Accessible (WCAG 2.1 AA)
-- [x] Page load time < 2 seconds
-- [x] All frontend tests passing
+- [ ] API endpoints accessible from website project
+- [ ] CORS configured correctly for weather-mcp.dev
+- [ ] All API responses match documented schemas
+- [ ] Website can successfully fetch and display analytics data
+- [ ] Response times acceptable from frontend (<100ms)
+- [ ] API documentation complete and accurate
 
 ### Deliverables
-1. Public dashboard UI
-2. Interactive charts and visualizations
-3. Responsive design
-4. Test suite
+1. API documentation (OpenAPI/Swagger spec)
+2. CORS configuration
+3. Integration guide for website developers
+4. TypeScript type definitions for API responses
+
+**Note:** The public-facing dashboard UI, charts, and visualizations are built in the separate `website` project at `/home/dgahagan/work/personal/weather-mcp/website/`. This project only provides the backend API.
 
 ---
 
@@ -1132,34 +1117,39 @@
   - Alert deduplication
   - **Estimated Time:** 2 hours
 
-#### 7.3 Grafana Setup
+#### 7.3 Grafana Setup (Operational Monitoring)
 - [ ] **7.3.1** Deploy Grafana
   - Add to docker-compose.yml
-  - Configure data sources
+  - Configure data sources (Prometheus, PostgreSQL)
   - Set up authentication
   - **Estimated Time:** 2 hours
 
-- [ ] **7.3.2** Create System Health dashboard
-  - Request rate graph
-  - Error rate graph
-  - Queue depth graph
-  - Database query performance
-  - **Estimated Time:** 4 hours
-
-- [ ] **7.3.3** Create Product Analytics dashboard
-  - Total events over time
-  - Tool usage pie chart
-  - Success rate by tool
-  - Top error types
-  - Geographic distribution
-  - **Estimated Time:** 4 hours
-
-- [ ] **7.3.4** Create Performance dashboard
+- [ ] **7.3.2** Create API Health dashboard
+  - Request rate graph (requests/second)
+  - Error rate graph (4xx, 5xx responses)
   - Response time percentiles (p50, p95, p99)
-  - Cache hit rates
-  - Service distribution
-  - Slow queries
+  - Active connections gauge
+  - Rate limiting metrics
   - **Estimated Time:** 4 hours
+
+- [ ] **7.3.3** Create Worker & Queue dashboard
+  - Queue depth over time
+  - Events processed per minute
+  - Worker processing time
+  - Failed event counter
+  - Dead letter queue size
+  - **Estimated Time:** 4 hours
+
+- [ ] **7.3.4** Create Database & Infrastructure dashboard
+  - Database query performance
+  - Connection pool utilization
+  - Redis memory usage
+  - Redis operation latency
+  - Table sizes and growth
+  - Disk space usage
+  - **Estimated Time:** 4 hours
+
+**Note:** Product analytics (tool usage, geographic distribution, etc.) are visualized in the public-facing website dashboard, not in Grafana. Grafana is for operational/infrastructure monitoring only.
 
 #### 7.4 Logging Infrastructure
 - [ ] **7.4.1** Configure structured logging
@@ -1201,18 +1191,20 @@
   - **Estimated Time:** 2 hours
 
 ### Success Criteria
-- [x] All metrics being collected
-- [x] Grafana dashboards showing accurate data
-- [x] Alerts configured and tested
-- [x] Logs aggregated and searchable
-- [x] Runbooks documented and accessible
+- [ ] All infrastructure metrics being collected
+- [ ] Grafana dashboards showing accurate operational data
+- [ ] Alerts configured and tested (service down, high error rate, etc.)
+- [ ] Logs aggregated and searchable
+- [ ] Runbooks documented and accessible
 
 ### Deliverables
 1. Prometheus setup with alerting
-2. Grafana dashboards (3 dashboards)
+2. Grafana dashboards (3 operational dashboards: API Health, Worker & Queue, Database & Infrastructure)
 3. Logging infrastructure
 4. Operational runbooks
 5. Monitoring documentation
+
+**Note:** These dashboards are for internal operational monitoring only. Public-facing analytics dashboards are in the website project.
 
 ---
 
@@ -1688,15 +1680,15 @@ After Phase 3 is complete, the following can be worked on in parallel:
 - Phase 1: Core Infrastructure
 - Phase 2: API & Validation
 
-### Week 3-4: Processing Pipeline
+### Week 3-4: Processing Pipeline & API
 - Phase 3: Queue & Worker
-- Phase 4: Dashboard API
-- Begin Phase 5: Frontend Dashboard
+- Phase 4: Dashboard API (public stats endpoints)
+- Begin Phase 5: Website Integration
 
-### Week 5-6: User Interface & Deployment
-- Complete Phase 5: Frontend Dashboard
+### Week 5-6: Integration & Deployment
+- Complete Phase 5: Website Integration (API docs, CORS)
 - Phase 6: Deployment & Infrastructure
-- Phase 7: Monitoring & Observability
+- Phase 7: Monitoring & Observability (Grafana for ops)
 
 ### Week 7-8: Quality & Launch
 - Phase 8: Testing & Quality Assurance
@@ -1724,7 +1716,13 @@ By following this plan, the analytics server will be built systematically, ensur
 
 ---
 
-**Document Version:** 1.0
+**Document Version:** 1.2
 **Created:** 2025-11-11
+**Last Updated:** 2025-11-13
 **Author:** Implementation Team
-**Status:** Ready for Review
+**Status:** In Development - Testing Complete
+
+**Version History:**
+- v1.0 (2025-11-11): Initial implementation plan
+- v1.1 (2025-11-13): Phase 8 (Testing) marked complete
+- v1.2 (2025-11-13): Architectural clarification - Phase 5 updated to Website Integration, Phase 7 Grafana scoped to operational monitoring only
