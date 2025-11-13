@@ -2,15 +2,20 @@ import { z } from 'zod';
 import type { AnalyticsEvent, ValidationResult } from '../types/events.js';
 import { apiLogger as logger } from '../utils/logger.js';
 
-// Define allowed tool names
+// Define allowed tool names (all 12 tools from weather-mcp v1.6.1)
 const VALID_TOOLS = [
   'get_forecast',
   'get_current_conditions',
   'get_alerts',
-  'get_hourly_forecast',
+  'get_historical_weather',
+  'check_service_status',
   'search_location',
-  'get_marine_forecast',
   'get_air_quality',
+  'get_marine_conditions',
+  'get_weather_imagery',
+  'get_lightning_activity',
+  'get_river_conditions',
+  'get_wildfire_info',
 ] as const;
 
 // Define allowed service types

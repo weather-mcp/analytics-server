@@ -15,6 +15,11 @@ import {
 } from './stats.js';
 import { register, recordHttpRequest, updateConnectionPoolMetrics, queueDepth as queueDepthGauge, recordEventReceived } from '../monitoring/metrics.js';
 import type { EventBatchRequest, EventBatchResponse, ErrorResponse } from '../types/events.js';
+import {
+  getAnalyticsData,
+  getOverviewStats,
+  getAnalyticsHealth,
+} from '../database/queries.js';
 
 // Create Fastify instance
 const server = Fastify({
@@ -360,6 +365,63 @@ server.post<{
     return {
       error: 'service_unavailable',
       details: 'Analytics service temporarily unavailable',
+    } as ErrorResponse;
+  }
+});
+
+// Statistics endpoint - Get overview statistics
+server.get<{
+  Querystring: { period?: string };
+}>('/v1/stats/overview', async (request, reply) => {
+  try {
+    const period = request.query.period || '24h';
+
+    logger.debug({ period }, 'Fetching overview stats');
+
+    const stats = await getOverviewStats(period);
+    return stats;
+  } catch (error) {
+    logger.error({ error, query: request.query }, 'Failed to get overview stats');
+    reply.status(500);
+    return {
+      error: 'internal_server_error',
+      details: 'Failed to retrieve statistics',
+    } as ErrorResponse;
+  }
+});
+
+// Statistics endpoint - Get complete analytics data
+server.get<{
+  Querystring: { period?: string };
+}>('/v1/stats/all', async (request, reply) => {
+  try {
+    const period = request.query.period || '24h';
+
+    logger.debug({ period }, 'Fetching complete analytics data');
+
+    const data = await getAnalyticsData(period);
+    return data;
+  } catch (error) {
+    logger.error({ error, query: request.query }, 'Failed to get analytics data');
+    reply.status(500);
+    return {
+      error: 'internal_server_error',
+      details: 'Failed to retrieve analytics data',
+    } as ErrorResponse;
+  }
+});
+
+// Statistics endpoint - Get analytics health
+server.get('/v1/stats/health', async (request, reply) => {
+  try {
+    const health = await getAnalyticsHealth();
+    return health;
+  } catch (error) {
+    logger.error({ error }, 'Failed to get analytics health');
+    reply.status(500);
+    return {
+      error: 'internal_server_error',
+      details: 'Failed to retrieve health status',
     } as ErrorResponse;
   }
 });

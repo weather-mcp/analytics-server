@@ -12,7 +12,9 @@ export const pool = new Pool({
   password: config.database.password,
   max: config.database.max,
   idleTimeoutMillis: config.database.idleTimeoutMillis,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,
+  // Disable SSL for local development
+  ssl: false,
   // Enable keepalive
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,

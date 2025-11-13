@@ -10,7 +10,7 @@ services:
     ports:
       - "54320:5432"
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
+      - postgres_dev_data:/var/lib/postgresql/data:Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U analytics"]
       interval: 10s
@@ -23,7 +23,7 @@ services:
     ports:
       - "6380:6379"
     volumes:
-      - redis_dev_data:/data
+      - redis_dev_data:/data:Z
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
