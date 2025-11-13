@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import compress from '@fastify/compress';
 import { config } from '../config.js';
 import { apiLogger as logger } from '../utils/logger.js';
 import { validateEventBatch } from './validation.js';
@@ -39,6 +40,13 @@ await server.register(cors, {
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: false,
+});
+
+// Register compression (gzip/brotli)
+await server.register(compress, {
+  global: true,
+  threshold: 1024, // Only compress responses > 1KB
+  encodings: ['gzip', 'deflate'],
 });
 
 // Register rate limiting

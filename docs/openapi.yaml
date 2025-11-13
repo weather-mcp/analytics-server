@@ -1,0 +1,723 @@
+openapi: 3.0.3
+info:
+  title: Weather MCP Analytics API
+  version: 1.0.0
+  description: |
+    Privacy-first analytics API for the Weather MCP project.
+
+    ## Features
+    - Privacy-first (no PII, no IP logging)
+    - Event ingestion with validation
+    - Aggregated statistics
+    - Rate limiting (60 req/min)
+    - Response compression (gzip/deflate)
+
+    ## Base URL
+    - Production: `https://analytics.weather-mcp.dev`
+    - Development: `http://localhost:3000`
+
+  contact:
+    name: Weather MCP Team
+    url: https://weather-mcp.dev
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://analytics.weather-mcp.dev
+    description: Production server
+  - url: http://localhost:3000
+    description: Development server
+
+tags:
+  - name: ingestion
+    description: Event ingestion endpoints
+  - name: stats
+    description: Statistics and analytics endpoints
+  - name: health
+    description: Health check and monitoring endpoints
+
+paths:
+  /v1/events:
+    post:
+      tags:
+        - ingestion
+      summary: Submit analytics events
+      description: |
+        Submit a batch of analytics events (max 100 per request).
+
+        **Privacy Guarantee**: All events are checked for PII before acceptance.
+        Events containing PII fields are rejected entirely.
+
+        **Rate Limiting**: 60 requests per minute per IP address.
+      operationId: submitEvents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatchRequest'
+            examples:
+              minimal:
+                summary: Minimal event (no performance data)
+                value:
+                  events:
+                    - version: "1.6.1"
+                      tool: "get_forecast"
+                      status: "success"
+                      timestamp_hour: "2025-11-13T14:00:00Z"
+                      analytics_level: "minimal"
+              standard:
+                summary: Standard event (with performance metrics)
+                value:
+                  events:
+                    - version: "1.6.1"
+                      tool: "get_forecast"
+                      status: "success"
+                      timestamp_hour: "2025-11-13T14:00:00Z"
+                      analytics_level: "standard"
+                      response_time_ms: 245
+                      service: "noaa"
+                      cache_hit: true
+                      retry_count: 0
+                      country: "US"
+      responses:
+        '202':
+          description: Events accepted and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatchResponse'
+              example:
+                status: "accepted"
+                count: 1
+                timestamp: "2025-11-13T14:23:45.678Z"
+        '400':
+          description: Invalid request (validation error or PII detected)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                validation_error:
+                  summary: Validation error
+                  value:
+                    error: "validation_failed"
+                    details:
+                      - "events.0.tool: Invalid enum value"
+                      - "events.0.timestamp_hour: Must be rounded to hour"
+                pii_detected:
+                  summary: PII detected in event
+                  value:
+                    error: "validation_failed"
+                    details:
+                      - "Event 0: Contains PII (rejected for privacy)"
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "rate_limit_exceeded"
+                message: "Too many requests, please try again later"
+                retry_after: 60
+        '503':
+          description: Queue full, service temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "queue_full"
+                details: "Queue full, please retry later"
+
+  /v1/health:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Returns the health status of the API and its dependencies
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: number
+                    description: Uptime in seconds
+                  dependencies:
+                    type: object
+                    properties:
+                      redis:
+                        type: string
+                        enum: [connected, disconnected]
+                      postgres:
+                        type: string
+                        enum: [connected, disconnected]
+                example:
+                  status: "healthy"
+                  timestamp: "2025-11-13T14:23:45.678Z"
+                  uptime: 3600
+                  dependencies:
+                    redis: "connected"
+                    postgres: "connected"
+
+  /v1/status:
+    get:
+      tags:
+        - health
+      summary: System status
+      description: Returns system status including queue depth and processing stats
+      operationId: systemStatus
+      responses:
+        '200':
+          description: System status information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queue_depth:
+                    type: integer
+                    description: Number of events waiting in queue
+                  last_event_received:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  events_processed_today:
+                    type: integer
+                example:
+                  queue_depth: 42
+                  last_event_received: "2025-11-13T14:22:30.123Z"
+                  events_processed_today: 15432
+
+  /v1/stats/overview:
+    get:
+      tags:
+        - stats
+      summary: Analytics overview
+      description: Returns high-level analytics summary for the specified time period
+      operationId: getOverview
+      parameters:
+        - name: period
+          in: query
+          description: Time period for statistics
+          required: false
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, all]
+            default: 7d
+      responses:
+        '200':
+          description: Analytics overview data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsOverview'
+              example:
+                period: "7d"
+                start_date: "2025-11-06"
+                end_date: "2025-11-13"
+                summary:
+                  total_calls: 125000
+                  unique_versions: 3
+                  active_installs: 42
+                  success_rate: 98.5
+                  avg_response_time_ms: 245
+                tools:
+                  - name: "get_forecast"
+                    calls: 45000
+                    success_rate: 99.2
+                    avg_response_time_ms: 220
+                    p95_response_time_ms: 450
+                errors:
+                  - type: "network_error"
+                    count: 150
+                    percentage: 0.12
+                    last_seen: "2025-11-13T14:00:00Z"
+                cache_hit_rate: 75.3
+
+  /v1/stats/tools:
+    get:
+      tags:
+        - stats
+      summary: Tool usage statistics
+      description: Returns usage statistics for all tools
+      operationId: getToolsStats
+      parameters:
+        - name: period
+          in: query
+          description: Time period for statistics
+          required: false
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, all]
+            default: 7d
+        - name: sort
+          in: query
+          description: Sort field
+          required: false
+          schema:
+            type: string
+            enum: [calls, success_rate, response_time]
+            default: calls
+      responses:
+        '200':
+          description: Tool statistics array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolStats'
+              example:
+                - name: "get_forecast"
+                  calls: 45000
+                  success_rate: 99.2
+                  avg_response_time_ms: 220
+                  p95_response_time_ms: 450
+                - name: "get_current_conditions"
+                  calls: 32000
+                  success_rate: 98.8
+                  avg_response_time_ms: 180
+                  p95_response_time_ms: 320
+
+  /v1/stats/tool/{toolName}:
+    get:
+      tags:
+        - stats
+      summary: Detailed tool statistics
+      description: Returns detailed statistics for a specific tool
+      operationId: getToolStats
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          description: Name of the tool
+          schema:
+            type: string
+            enum:
+              - get_forecast
+              - get_current_conditions
+              - get_alerts
+              - get_historical_weather
+              - get_air_quality
+              - get_marine_conditions
+              - get_river_conditions
+              - get_wildfire_info
+              - search_location
+              - check_service_status
+              - get_weather_imagery
+              - get_lightning_activity
+        - name: period
+          in: query
+          description: Time period for statistics
+          required: false
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, all]
+            default: 7d
+      responses:
+        '200':
+          description: Detailed tool statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tool:
+                    type: string
+                  period:
+                    type: string
+                  total_calls:
+                    type: integer
+                  success_rate:
+                    type: number
+                  performance:
+                    type: object
+                    properties:
+                      avg_ms:
+                        type: number
+                      p50_ms:
+                        type: number
+                      p95_ms:
+                        type: number
+                      p99_ms:
+                        type: number
+                  by_service:
+                    type: object
+                    properties:
+                      noaa:
+                        type: integer
+                      openmeteo:
+                        type: integer
+                  cache_hit_rate:
+                    type: number
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ErrorStats'
+        '404':
+          description: Tool not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/stats/errors:
+    get:
+      tags:
+        - stats
+      summary: Error statistics
+      description: Returns error summary and trends
+      operationId: getErrorStats
+      parameters:
+        - name: period
+          in: query
+          description: Time period for statistics
+          required: false
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, all]
+            default: 7d
+      responses:
+        '200':
+          description: Error statistics array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ErrorStats'
+              example:
+                - type: "network_error"
+                  count: 150
+                  percentage: 0.12
+                  last_seen: "2025-11-13T14:00:00Z"
+                - type: "timeout"
+                  count: 42
+                  percentage: 0.03
+                  last_seen: "2025-11-13T12:30:00Z"
+
+  /v1/stats/performance:
+    get:
+      tags:
+        - stats
+      summary: Performance statistics
+      description: Returns performance metrics and cache statistics
+      operationId: getPerformanceStats
+      parameters:
+        - name: period
+          in: query
+          description: Time period for statistics
+          required: false
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, all]
+            default: 7d
+      responses:
+        '200':
+          description: Performance statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response_time:
+                    type: object
+                    properties:
+                      avg_ms:
+                        type: number
+                      p50_ms:
+                        type: number
+                      p95_ms:
+                        type: number
+                      p99_ms:
+                        type: number
+                  cache:
+                    type: object
+                    properties:
+                      hit_rate:
+                        type: number
+                      total_hits:
+                        type: integer
+                      total_misses:
+                        type: integer
+                  service_distribution:
+                    type: object
+                    properties:
+                      noaa:
+                        type: integer
+                      openmeteo:
+                        type: integer
+                  retry_stats:
+                    type: object
+                    properties:
+                      total_retries:
+                        type: integer
+                      avg_retry_count:
+                        type: number
+
+  /metrics:
+    get:
+      tags:
+        - health
+      summary: Prometheus metrics
+      description: Returns metrics in Prometheus exposition format
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP http_requests_total Total number of HTTP requests
+                # TYPE http_requests_total counter
+                http_requests_total{method="GET",route="/v1/stats/overview",status="200"} 1234
+
+components:
+  schemas:
+    MinimalEvent:
+      type: object
+      required:
+        - version
+        - tool
+        - status
+        - timestamp_hour
+        - analytics_level
+      properties:
+        version:
+          type: string
+          description: MCP server version
+          example: "1.6.1"
+        tool:
+          type: string
+          enum:
+            - get_forecast
+            - get_current_conditions
+            - get_alerts
+            - get_historical_weather
+            - get_air_quality
+            - get_marine_conditions
+            - get_river_conditions
+            - get_wildfire_info
+            - search_location
+            - check_service_status
+            - get_weather_imagery
+            - get_lightning_activity
+        status:
+          type: string
+          enum: [success, error]
+        timestamp_hour:
+          type: string
+          format: date-time
+          description: Timestamp rounded to the hour (e.g., 2025-11-13T14:00:00Z)
+        analytics_level:
+          type: string
+          enum: [minimal]
+
+    StandardEvent:
+      allOf:
+        - $ref: '#/components/schemas/MinimalEvent'
+        - type: object
+          properties:
+            analytics_level:
+              type: string
+              enum: [standard]
+            response_time_ms:
+              type: integer
+              minimum: 0
+              maximum: 120000
+            service:
+              type: string
+              enum: [noaa, openmeteo]
+            cache_hit:
+              type: boolean
+            retry_count:
+              type: integer
+              minimum: 0
+              maximum: 10
+            country:
+              type: string
+              pattern: '^[A-Z]{2}$'
+              description: ISO 3166-1 alpha-2 country code
+            error_type:
+              type: string
+              maxLength: 100
+              description: Error type (required if status is 'error')
+
+    DetailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/StandardEvent'
+        - type: object
+          properties:
+            analytics_level:
+              type: string
+              enum: [detailed]
+            parameters:
+              type: object
+              additionalProperties: true
+              description: Anonymized parameters (no PII)
+            session_id:
+              type: string
+              minLength: 16
+              maxLength: 16
+              description: Hashed session identifier
+            sequence_number:
+              type: integer
+              minimum: 0
+
+    EventBatchRequest:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/MinimalEvent'
+              - $ref: '#/components/schemas/StandardEvent'
+              - $ref: '#/components/schemas/DetailedEvent'
+
+    EventBatchResponse:
+      type: object
+      required:
+        - status
+        - count
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [accepted]
+        count:
+          type: integer
+          description: Number of events accepted
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Detailed error information
+        retry_after:
+          type: integer
+          description: Seconds to wait before retrying (for rate limiting)
+
+    StatsOverview:
+      type: object
+      required:
+        - period
+        - start_date
+        - end_date
+        - summary
+        - tools
+        - errors
+        - cache_hit_rate
+      properties:
+        period:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        summary:
+          type: object
+          properties:
+            total_calls:
+              type: integer
+            unique_versions:
+              type: integer
+            active_installs:
+              type: integer
+              description: Estimated active installations
+            success_rate:
+              type: number
+              description: Success rate percentage
+            avg_response_time_ms:
+              type: number
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolStats'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorStats'
+        cache_hit_rate:
+          type: number
+          description: Cache hit rate percentage
+
+    ToolStats:
+      type: object
+      required:
+        - name
+        - calls
+        - success_rate
+        - avg_response_time_ms
+      properties:
+        name:
+          type: string
+        calls:
+          type: integer
+        success_rate:
+          type: number
+          description: Success rate percentage
+        avg_response_time_ms:
+          type: number
+        p95_response_time_ms:
+          type: number
+
+    ErrorStats:
+      type: object
+      required:
+        - type
+        - count
+        - percentage
+      properties:
+        type:
+          type: string
+        count:
+          type: integer
+        percentage:
+          type: number
+          description: Percentage of total errors
+        last_seen:
+          type: string
+          format: date-time
+
+  securitySchemes: {}
+
+security: []
