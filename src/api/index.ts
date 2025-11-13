@@ -7,7 +7,6 @@ import { validateEventBatch } from './validation.js';
 import { pool, checkDatabaseHealth, getDatabaseStats } from '../database/index.js';
 import { queueEvents, getQueueDepth } from '../queue/index.js';
 import {
-  getStatsOverview,
   getToolsStats,
   getToolStats,
   getErrorStats,
@@ -21,6 +20,8 @@ import {
   getAnalyticsHealth,
 } from '../database/queries.js';
 
+import crypto from 'crypto';
+
 // Create Fastify instance
 const server = Fastify({
   logger: false, // We use our custom logger
@@ -29,6 +30,7 @@ const server = Fastify({
   disableRequestLogging: true, // We'll do custom request logging
   requestIdHeader: 'x-request-id',
   requestIdLogLabel: 'reqId',
+  genReqId: () => crypto.randomUUID(), // Cryptographically secure request IDs
 });
 
 // Register CORS
@@ -200,24 +202,6 @@ server.get('/v1/status', async (_request, reply) => {
 // =============================================================================
 // STATS API ENDPOINTS
 // =============================================================================
-
-// Get overview statistics
-server.get<{
-  Querystring: { period?: string };
-}>('/v1/stats/overview', async (request, reply) => {
-  try {
-    const { period = '30d' } = request.query;
-    const stats = await getStatsOverview(period);
-    return stats;
-  } catch (error: any) {
-    logger.error({ error, reqId: request.id }, 'Failed to get stats overview');
-    reply.status(400);
-    return {
-      error: 'invalid_request',
-      details: error.message || 'Failed to retrieve statistics',
-    } as ErrorResponse;
-  }
-});
 
 // Get all tools statistics
 server.get<{
@@ -412,7 +396,7 @@ server.get<{
 });
 
 // Statistics endpoint - Get analytics health
-server.get('/v1/stats/health', async (request, reply) => {
+server.get('/v1/stats/health', async (_request, reply) => {
   try {
     const health = await getAnalyticsHealth();
     return health;

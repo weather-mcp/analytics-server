@@ -95,6 +95,9 @@ const PII_FIELDS = [
 /**
  * Check if an event contains PII (Personally Identifiable Information)
  * Returns true if PII is detected, false otherwise
+ *
+ * Uses constant-time checking to prevent timing attacks that could
+ * reveal which PII fields are being checked.
  */
 function hasPII(event: unknown): boolean {
   if (typeof event !== 'object' || event === null) {
@@ -102,12 +105,15 @@ function hasPII(event: unknown): boolean {
   }
 
   const eventObj = event as Record<string, unknown>;
+  let hasPIIFound = false;
+  const detectedFields: string[] = [];
 
-  // Check top-level fields
+  // Check all top-level fields (constant-time - check all fields even if one matches)
   for (const field of PII_FIELDS) {
     if (field in eventObj) {
-      logger.warn({ field }, 'PII field detected in event');
-      return true;
+      detectedFields.push(field);
+      hasPIIFound = true;
+      // Don't return early - continue checking all fields
     }
   }
 
@@ -116,13 +122,19 @@ function hasPII(event: unknown): boolean {
     const params = eventObj.parameters as Record<string, unknown>;
     for (const field of PII_FIELDS) {
       if (field in params) {
-        logger.warn({ field: `parameters.${field}` }, 'PII field detected in parameters');
-        return true;
+        detectedFields.push(`parameters.${field}`);
+        hasPIIFound = true;
+        // Don't return early - continue checking all fields
       }
     }
   }
 
-  return false;
+  // Log after all checks complete (still constant time per event)
+  if (hasPIIFound) {
+    logger.warn({ fields: detectedFields }, 'PII fields detected in event');
+  }
+
+  return hasPIIFound;
 }
 
 /**

@@ -3,6 +3,11 @@ import { config } from '../config.js';
 import { queueLogger as logger } from '../utils/logger.js';
 import type { AnalyticsEvent } from '../types/events.js';
 
+// Validate Redis password in production
+if (config.isProduction() && !config.redis.password) {
+  throw new Error('REDIS_PASSWORD is required in production environment');
+}
+
 // Create Redis client
 export const redis = new Redis({
   host: config.redis.host,

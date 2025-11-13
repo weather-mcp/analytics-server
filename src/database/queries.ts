@@ -1,6 +1,24 @@
 import { pool } from './index.js';
 import { dbLogger as logger } from '../utils/logger.js';
 
+/**
+ * Safely parse an integer value, returning a default if invalid
+ */
+function safeParseInt(value: string | number | null | undefined, defaultValue: number = 0): number {
+  if (value === null || value === undefined) return defaultValue;
+  const parsed = typeof value === 'number' ? value : parseInt(value, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Safely parse a float value, returning a default if invalid
+ */
+function safeParseFloat(value: string | number | null | undefined, defaultValue: number = 0): number {
+  if (value === null || value === undefined) return defaultValue;
+  const parsed = typeof value === 'number' ? value : parseFloat(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
 export interface PeriodRange {
   start: Date;
   end: Date;
@@ -107,7 +125,7 @@ export interface AnalyticsData {
 
 /**
  * Parse period string to date range
- * Supports: 1h, 6h, 12h, 24h, 7d, 30d, 90d
+ * Supports: 1h-720h (up to 30 days in hours), 1d-365d (up to 1 year in days)
  */
 export function parsePeriod(period: string): PeriodRange {
   const now = new Date();
@@ -121,9 +139,20 @@ export function parsePeriod(period: string): PeriodRange {
   const value = parseInt(match[1], 10);
   const unit = match[2];
 
+  // Validate bounds to prevent DoS via expensive queries
+  if (isNaN(value) || value < 1) {
+    throw new Error('Period value must be a positive integer');
+  }
+
   if (unit === 'h') {
+    if (value > 720) { // Max 30 days in hours
+      throw new Error('Hour period must be between 1 and 720 hours (30 days)');
+    }
     start.setHours(start.getHours() - value);
   } else if (unit === 'd') {
+    if (value > 365) { // Max 1 year
+      throw new Error('Day period must be between 1 and 365 days');
+    }
     start.setDate(start.getDate() - value);
   }
 
@@ -151,14 +180,35 @@ export async function getOverviewStats(period: string): Promise<OverviewStats> {
     `;
 
     const summaryResult = await pool.query(summaryQuery, [range.start, range.end]);
+
+    // Validate that we have results
+    if (summaryResult.rows.length === 0) {
+      logger.warn({ period }, 'No data found for period');
+      return {
+        period,
+        start_date: range.start.toISOString(),
+        end_date: range.end.toISOString(),
+        summary: {
+          total_calls: 0,
+          unique_versions: 0,
+          active_installs: 0,
+          success_rate: 0,
+          avg_response_time_ms: 0,
+        },
+        tools: [],
+        errors: [],
+        cache_hit_rate: 0,
+      };
+    }
+
     const summary = summaryResult.rows[0];
 
-    const totalCalls = parseInt(summary.total_calls || '0', 10);
-    const successCalls = parseInt(summary.success_calls || '0', 10);
+    const totalCalls = safeParseInt(summary.total_calls, 0);
+    const successCalls = safeParseInt(summary.success_calls, 0);
     const successRate = totalCalls > 0 ? successCalls / totalCalls : 0;
 
     // Estimate active installs (unique versions is a proxy)
-    const activeInstalls = parseInt(summary.unique_versions || '0', 10) * 5; // Rough estimate
+    const activeInstalls = safeParseInt(summary.unique_versions, 0) * 5; // Rough estimate
 
     // Query tool summaries
     const toolsQuery = `
@@ -174,12 +224,16 @@ export async function getOverviewStats(period: string): Promise<OverviewStats> {
     `;
 
     const toolsResult = await pool.query(toolsQuery, [range.start, range.end]);
-    const tools: ToolSummary[] = toolsResult.rows.map(row => ({
-      name: row.name,
-      calls: parseInt(row.calls, 10),
-      success_rate: row.calls > 0 ? parseFloat(row.success_calls) / parseFloat(row.calls) : 0,
-      avg_response_time_ms: parseFloat(row.avg_response_time_ms || '0'),
-    }));
+    const tools: ToolSummary[] = toolsResult.rows.map(row => {
+      const calls = safeParseInt(row.calls, 0);
+      const successCalls = safeParseInt(row.success_calls, 0);
+      return {
+        name: row.name,
+        calls,
+        success_rate: calls > 0 ? successCalls / calls : 0,
+        avg_response_time_ms: safeParseFloat(row.avg_response_time_ms, 0),
+      };
+    });
 
     // Query error summaries
     const errorsQuery = `
@@ -196,7 +250,7 @@ export async function getOverviewStats(period: string): Promise<OverviewStats> {
 
     const errorsResult = await pool.query(errorsQuery, [range.start, range.end]);
     const errors: ErrorSummary[] = errorsResult.rows.map(row => {
-      const errorCount = parseInt(row.count, 10);
+      const errorCount = safeParseInt(row.count, 0);
       return {
         type: row.type,
         count: errorCount,
@@ -211,14 +265,14 @@ export async function getOverviewStats(period: string): Promise<OverviewStats> {
       end_date: range.end.toISOString(),
       summary: {
         total_calls: totalCalls,
-        unique_versions: parseInt(summary.unique_versions || '0', 10),
+        unique_versions: safeParseInt(summary.unique_versions, 0),
         active_installs: activeInstalls,
         success_rate: successRate,
-        avg_response_time_ms: parseFloat(summary.avg_response_time_ms || '0'),
+        avg_response_time_ms: safeParseFloat(summary.avg_response_time_ms, 0),
       },
       tools,
       errors,
-      cache_hit_rate: parseFloat(summary.avg_cache_hit_rate || '0'),
+      cache_hit_rate: safeParseFloat(summary.avg_cache_hit_rate, 0),
     };
   } catch (error) {
     logger.error({ error, period }, 'Failed to get overview stats');
@@ -255,7 +309,7 @@ export async function getToolUsageData(period: string): Promise<ToolUsageData[]>
         timelineMap.set(timestamp, { timestamp });
       }
       const entry = timelineMap.get(timestamp)!;
-      entry[row.tool] = parseInt(row.calls, 10);
+      entry[row.tool] = safeParseInt(row.calls, 0);
     }
 
     return Array.from(timelineMap.values());
@@ -290,10 +344,10 @@ export async function getPerformanceMetrics(period: string): Promise<Performance
 
     for (const row of byToolResult.rows) {
       by_tool[row.tool] = {
-        avg: parseFloat(row.avg || '0'),
-        p50: parseFloat(row.p50 || '0'),
-        p95: parseFloat(row.p95 || '0'),
-        p99: parseFloat(row.p99 || '0'),
+        avg: safeParseFloat(row.avg, 0),
+        p50: safeParseFloat(row.p50, 0),
+        p95: safeParseFloat(row.p95, 0),
+        p99: safeParseFloat(row.p99, 0),
       };
     }
 
@@ -312,9 +366,9 @@ export async function getPerformanceMetrics(period: string): Promise<Performance
     const timelineResult = await pool.query(timelineQuery, [range.start, range.end]);
     const timeline = timelineResult.rows.map(row => ({
       timestamp: new Date(row.timestamp).toISOString(),
-      p50: parseFloat(row.avg || '0'), // Using avg as proxy for p50
-      p95: parseFloat(row.p95 || '0'),
-      p99: parseFloat(row.p95 || '0') * 1.2, // Rough estimate
+      p50: safeParseFloat(row.avg, 0), // Using avg as proxy for p50
+      p95: safeParseFloat(row.p95, 0),
+      p99: safeParseFloat(row.p95, 0) * 1.2, // Rough estimate
     }));
 
     return { by_tool, timeline };
@@ -344,9 +398,9 @@ export async function getCacheStats(period: string): Promise<CacheStats> {
     const overallResult = await pool.query(overallQuery, [range.start, range.end]);
     const overall = overallResult.rows[0];
 
-    const totalRequests = parseInt(overall.total_requests || '0', 10);
-    const cacheHits = parseInt(overall.cache_hits || '0', 10);
-    const cacheMisses = parseInt(overall.cache_misses || '0', 10);
+    const totalRequests = safeParseInt(overall.total_requests, 0);
+    const cacheHits = safeParseInt(overall.cache_hits, 0);
+    const cacheMisses = safeParseInt(overall.cache_misses, 0);
     const hitRate = (cacheHits + cacheMisses) > 0 ? (cacheHits / (cacheHits + cacheMisses)) * 100 : 0;
 
     // Get by-tool cache stats
@@ -364,8 +418,8 @@ export async function getCacheStats(period: string): Promise<CacheStats> {
     const by_tool: CacheStats['by_tool'] = {};
 
     for (const row of byToolResult.rows) {
-      const hits = parseInt(row.hits || '0', 10);
-      const misses = parseInt(row.misses || '0', 10);
+      const hits = safeParseInt(row.hits, 0);
+      const misses = safeParseInt(row.misses, 0);
       const toolHitRate = (hits + misses) > 0 ? (hits / (hits + misses)) * 100 : 0;
 
       by_tool[row.tool] = {
@@ -391,6 +445,11 @@ export async function getCacheStats(period: string): Promise<CacheStats> {
 
 /**
  * Get service distribution
+ *
+ * Note: This calculates service-specific success rates based on the assumption
+ * that the ratio of successes to errors is proportional across services.
+ * For more accurate rates, consider tracking service-specific success/error counts
+ * in the aggregation tables in a future schema update.
  */
 export async function getServiceDistribution(period: string): Promise<ServiceDistribution> {
   try {
@@ -410,21 +469,30 @@ export async function getServiceDistribution(period: string): Promise<ServiceDis
     const result = await pool.query(query, [range.start, range.end]);
     const row = result.rows[0];
 
-    const noaaCalls = parseInt(row.noaa_calls || '0', 10);
-    const openmeoCalls = parseInt(row.openmeteo_calls || '0', 10);
-    const totalCalls = parseInt(row.total_calls || '0', 10);
-    const successCalls = parseInt(row.success_calls || '0', 10);
+    const noaaCalls = safeParseInt(row.noaa_calls, 0);
+    const openmeoCalls = safeParseInt(row.openmeteo_calls, 0);
+    const totalCalls = safeParseInt(row.total_calls, 0);
+    const successCalls = safeParseInt(row.success_calls, 0);
+
+    // Calculate overall success rate
+    const overallSuccessRate = totalCalls > 0 ? successCalls / totalCalls : 0;
+
+    // For service-specific success rates, we'll apply the overall success rate
+    // as an estimate since we don't track service-specific success/error counts
+    // This is a limitation that should be addressed in the schema if more accuracy is needed
+    const noaaSuccessRate = overallSuccessRate;
+    const openmeteoSuccessRate = overallSuccessRate;
 
     return {
       noaa: {
         calls: noaaCalls,
         percentage: totalCalls > 0 ? (noaaCalls / totalCalls) * 100 : 0,
-        success_rate: noaaCalls > 0 ? successCalls / totalCalls : 0, // Simplified
+        success_rate: noaaSuccessRate,
       },
       openMeteo: {
         calls: openmeoCalls,
         percentage: totalCalls > 0 ? (openmeoCalls / totalCalls) * 100 : 0,
-        success_rate: openmeoCalls > 0 ? successCalls / totalCalls : 0, // Simplified
+        success_rate: openmeteoSuccessRate,
       },
     };
   } catch (error) {
@@ -455,14 +523,17 @@ export async function getGeoDistribution(period: string): Promise<GeoDistributio
 
     const result = await pool.query(query, [range.start, range.end]);
 
-    const totalCalls = result.rows.reduce((sum, row) => sum + parseInt(row.calls, 10), 0);
+    const totalCalls = result.rows.reduce((sum, row) => sum + safeParseInt(row.calls, 0), 0);
 
-    const countries = result.rows.map(row => ({
-      code: row.code,
-      name: row.code, // Would need a country code lookup for full names
-      calls: parseInt(row.calls, 10),
-      percentage: totalCalls > 0 ? (parseInt(row.calls, 10) / totalCalls) * 100 : 0,
-    }));
+    const countries = result.rows.map(row => {
+      const calls = safeParseInt(row.calls, 0);
+      return {
+        code: row.code,
+        name: row.code, // Would need a country code lookup for full names
+        calls,
+        percentage: totalCalls > 0 ? (calls / totalCalls) * 100 : 0,
+      };
+    });
 
     return { countries };
   } catch (error) {
@@ -521,7 +592,7 @@ export async function getAnalyticsHealth(): Promise<{
     const result = await pool.query(query);
     const row = result.rows[0];
 
-    const events24h = parseInt(row.events_24h || '0', 10);
+    const events24h = safeParseInt(row.events_24h, 0);
     const lastEvent = row.last_event ? new Date(row.last_event).toISOString() : new Date().toISOString();
 
     // Determine status based on recent activity

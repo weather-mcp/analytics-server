@@ -13,8 +13,14 @@ export const pool = new Pool({
   max: config.database.max,
   idleTimeoutMillis: config.database.idleTimeoutMillis,
   connectionTimeoutMillis: 10000,
-  // Disable SSL for local development
-  ssl: false,
+  // Enable SSL/TLS for production, disable for development
+  ssl: config.isProduction() ? {
+    rejectUnauthorized: true,
+    // In production, these would typically be set:
+    // ca: fs.readFileSync(config.database.sslCaPath).toString(),
+    // cert: fs.readFileSync(config.database.sslCertPath).toString(),
+    // key: fs.readFileSync(config.database.sslKeyPath).toString(),
+  } : false,
   // Enable keepalive
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,

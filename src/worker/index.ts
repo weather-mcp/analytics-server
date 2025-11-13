@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { workerLogger as logger } from '../utils/logger.js';
-import { dequeueEvents, getQueueDepth, closeRedisConnection } from '../queue/index.js';
+import { dequeueEvents, queueEvents, getQueueDepth, closeRedisConnection } from '../queue/index.js';
 import {
   insertEvents,
   updateAggregations,
@@ -11,6 +11,7 @@ import {
 let isRunning = false;
 let isShuttingDown = false;
 let processingCount = 0;
+let statsInterval: NodeJS.Timeout | null = null;
 
 // Statistics
 let totalProcessed = 0;
@@ -21,12 +22,6 @@ let lastProcessedAt: Date | null = null;
  * Process a batch of events from the queue
  */
 async function processBatch(): Promise<void> {
-  if (isShuttingDown) {
-    logger.info('Skipping batch processing - worker is shutting down');
-    return;
-  }
-
-  processingCount++;
   try {
     // Dequeue a batch of events
     const events = await dequeueEvents(config.queue.batchSize);
@@ -36,6 +31,16 @@ async function processBatch(): Promise<void> {
       logger.debug('Queue is empty, nothing to process');
       return;
     }
+
+    // Check shutdown AFTER dequeue but BEFORE incrementing counter
+    // If shutting down, re-queue the events so they're not lost
+    if (isShuttingDown) {
+      logger.warn('Shutdown detected, re-queuing events');
+      await queueEvents(events);
+      return;
+    }
+
+    processingCount++;
 
     logger.info({
       count: events.length,
@@ -84,7 +89,9 @@ async function processBatch(): Promise<void> {
       totalProcessed,
     }, 'Error processing batch');
   } finally {
-    processingCount--;
+    if (processingCount > 0) {
+      processingCount--;
+    }
   }
 }
 
@@ -164,6 +171,13 @@ export async function stopWorker(): Promise<void> {
     }, 'Worker stopped with batches still in progress');
   }
 
+  // Clear stats interval
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
+    logger.debug('Stats interval cleared');
+  }
+
   // Close connections
   try {
     await closeRedisConnection();
@@ -224,7 +238,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 
   // Log stats periodically
-  setInterval(() => {
+  statsInterval = setInterval(() => {
     const stats = getWorkerStats();
     logger.info({
       ...stats,
@@ -232,8 +246,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }, 'Worker statistics');
 
     // Async fetch queue depth for next log
-    getQueueDepth().then((depth) => {
-      logger.debug({ queueDepth: depth }, 'Current queue depth');
-    });
+    getQueueDepth()
+      .then((depth) => {
+        logger.debug({ queueDepth: depth }, 'Current queue depth');
+      })
+      .catch((error) => {
+        logger.error({ error }, 'Failed to get queue depth for stats');
+      });
   }, 60000); // Every minute
 }
