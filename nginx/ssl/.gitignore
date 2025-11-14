@@ -1,0 +1,8 @@
+# Ignore all SSL certificate files to prevent accidentally committing them
+*.pem
+*.key
+*.crt
+*.csr
+
+# Exception: Keep the README
+!README.md
