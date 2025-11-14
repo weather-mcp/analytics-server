@@ -6,18 +6,24 @@ Privacy-first analytics collection server for the Weather MCP project.
 
 This server collects anonymous usage analytics from Weather MCP server instances to help improve the product while strictly protecting user privacy. It consists of:
 
-- **API Service**: Fastify-based REST API for receiving analytics events
+- **API Service**: Fastify-based REST API for receiving analytics events and serving stats
 - **Worker Process**: Background job processor for database writes and aggregations
 - **Database**: PostgreSQL with TimescaleDB for efficient time-series storage
 - **Queue**: Redis for buffering and async processing
-- **Dashboard**: React-based real-time analytics dashboard
+- **Monitoring**: Prometheus metrics + Grafana dashboards for operational observability
+
+**Note:** The public-facing analytics dashboard is hosted separately in the [website project](https://github.com/weather-mcp/website). This server provides the backend API that the website consumes.
 
 ## Architecture
 
 ```
 MCP Servers → API Service → Redis Queue → Worker → PostgreSQL/TimescaleDB
-                  ↓                                        ↓
-            Prometheus Metrics                   Public Dashboard API
+       |          ↓                |                        ↓
+       |    Prometheus ←───────────┘              Public Stats API
+       |          ↓                                        ↓
+       |      Grafana                              Website Dashboard
+       |    (ops monitoring)                     (public analytics)
+       └──────────────────────────────────────────────────┘
 ```
 
 ## Privacy Principles
@@ -42,33 +48,27 @@ MCP Servers → API Service → Redis Queue → Worker → PostgreSQL/TimescaleD
 - `GET /v1/stats/performance` - Performance metrics
 - `GET /metrics` - Prometheus metrics
 
-### Dashboard
+### Operational Monitoring
 
-- Real-time analytics visualization
-- Interactive charts (Bar, Pie)
-- Period filtering (7d, 30d, 90d)
-- Auto-refresh every 30 seconds
-- Mobile-responsive design
-
-### Monitoring
-
-- Prometheus metrics export
-- Database connection pool monitoring
-- Queue depth tracking
-- Request/response metrics
-- Event processing metrics
+- **Prometheus** for metrics collection (30-day retention)
+- **Grafana** for operational dashboards (3 dashboards included):
+  - API Health (request rate, errors, response times)
+  - Worker & Queue (queue depth, processing stats, errors)
+  - Database & Infrastructure (query performance, connections, resources)
+- **Alertmanager** for notifications (email, Slack)
+- **15+ alert rules** across 6 groups (API, queue, worker, database, resources, data freshness)
+- Auto-refresh dashboards (10-second intervals)
 
 ## Tech Stack
 
 - **Runtime**: Node.js 20 LTS
 - **Framework**: Fastify
-- **Frontend**: React 18 + TypeScript + Vite
-- **Styling**: Tailwind CSS
-- **Charts**: Recharts
-- **Database**: PostgreSQL 16 + TimescaleDB
+- **Database**: PostgreSQL 16 + TimescaleDB 2.x
 - **Queue**: Redis 7
-- **Monitoring**: Prometheus + Grafana (optional)
+- **Monitoring**: Prometheus + Grafana + Alertmanager
 - **Container**: Docker + Docker Compose
+- **Reverse Proxy**: Nginx (production)
+- **Logging**: Pino (structured JSON logging)
 
 ## Quick Start with Docker
 
@@ -100,8 +100,10 @@ curl http://localhost:3000/v1/health
 ### 3. Access Services
 
 - **API**: http://localhost:3000
-- **Dashboard**: http://localhost:5173
-- **Prometheus Metrics**: http://localhost:3000/metrics
+- **API Health**: http://localhost:3000/v1/health
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3001 (admin/admin)
+- **Alertmanager**: http://localhost:9093
 
 ## Development Setup
 
@@ -308,30 +310,35 @@ npm test -- tests/integration/stats-api.test.ts
 
 ## Monitoring
 
+The analytics server includes comprehensive operational monitoring for infrastructure health and performance.
+
 ### Prometheus Metrics
 
 The `/metrics` endpoint exposes the following metrics:
 
-- `http_requests_total` - Total HTTP requests
+- `http_requests_total` - Total HTTP requests by route and status
 - `http_request_duration_seconds` - Request duration histogram
-- `events_received_total` - Events received by analytics level
+- `events_received_total` - Events received by analytics level and tool
 - `events_processed_total` - Events processed (success/error)
-- `queue_depth` - Current queue depth
-- `database_connection_pool` - Connection pool stats
+- `queue_depth` - Current queue depth gauge
+- `database_connection_pool` - Connection pool stats (total, idle, waiting)
+- `database_query_duration_seconds` - Query performance histogram
 - `cache_operations_total` - Cache hits/misses
-- Plus Node.js default metrics (CPU, memory, GC, etc.)
+- `worker_batch_size` - Worker batch size distribution
+- `worker_errors_total` - Worker errors by type
+- Plus Node.js default metrics (CPU, memory, GC, event loop, etc.)
 
-### Grafana Dashboard (Optional)
+### Grafana Dashboards
 
-```bash
-# Add Grafana to docker-compose
-docker-compose up -d grafana
+Three pre-configured operational dashboards are included:
 
-# Access at http://localhost:3001
-# Default credentials: admin/admin
-```
+1. **API Health Dashboard**: Request rates, error rates, response times (p50/p95/p99), uptime
+2. **Worker & Queue Dashboard**: Queue depth, processing rates, batch sizes, worker errors
+3. **Database & Infrastructure Dashboard**: Query performance, connection pool, cache hit rates, memory/CPU
 
-Import the provided dashboard JSON from `monitoring/grafana-dashboard.json`.
+All dashboards auto-refresh every 10 seconds and include color-coded alerts.
+
+**See:** [MONITORING_GUIDE.md](docs/MONITORING_GUIDE.md) for complete monitoring documentation.
 
 ## Data Retention
 
@@ -344,47 +351,54 @@ Configured via TimescaleDB retention policies:
 
 ## Production Deployment
 
-### Digital Ocean Deployment
+The analytics server is production-ready and includes comprehensive deployment infrastructure.
 
-1. **Create Droplet** ($6/month Basic plan)
-   - Ubuntu 22.04 LTS
-   - 1 GB RAM / 25 GB SSD
+### Quick Production Deployment
 
-2. **Install Docker**
 ```bash
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo systemctl enable docker
-```
-
-3. **Clone and Configure**
-```bash
+# 1. Clone and configure
 git clone https://github.com/weather-mcp/analytics-server.git
 cd analytics-server
 cp .env.example .env
-nano .env  # Configure for production
+nano .env  # Update with production values
+
+# 2. Start with production configuration
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# 3. Verify deployment
+./scripts/health-check.sh
 ```
 
-4. **Start Services**
-```bash
-docker-compose -f docker-compose.yml up -d
-```
+### Production Features
 
-5. **Configure Nginx** (on host)
-   - Set up reverse proxy
-   - Configure SSL with Let's Encrypt
-   - Enable rate limiting
+- **Docker Compose** with production overrides (resource limits, security hardening)
+- **Nginx Reverse Proxy** with SSL/TLS, rate limiting, privacy-first logging
+- **Automated Database Backups** (7-day retention, compression, verification)
+- **Health Monitoring Scripts** (API, database, Redis, disk space)
+- **Cron Job Setup** (automated backups and maintenance)
+- **Resource Limits** for all services (CPU, memory)
+- **Log Rotation** configuration
+- **Security Hardening** (internal-only ports, TLS 1.2+, HSTS)
 
-### Security Checklist
+### Comprehensive Documentation
 
-- [ ] Change default database password
+- **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** - Complete VPS deployment walkthrough (5,500+ words)
+- **[PRE_DEPLOYMENT_CHECKLIST.md](docs/PRE_DEPLOYMENT_CHECKLIST.md)** - 80+ verification items
+- **[OPERATIONS_GUIDE.md](docs/OPERATIONS_GUIDE.md)** - Daily operations and maintenance (4,000+ words)
+- **[MONITORING_GUIDE.md](docs/MONITORING_GUIDE.md)** - Monitoring and observability (7,000+ words)
+
+### Quick Security Checklist
+
+- [ ] Change default database password in `.env`
 - [ ] Configure firewall (UFW)
-- [ ] Set up SSL/TLS certificates
-- [ ] Enable Nginx rate limiting
-- [ ] Configure Cloudflare proxy (optional)
-- [ ] Set up automated backups
-- [ ] Configure log rotation
-- [ ] Enable monitoring alerts
+- [ ] Set up SSL/TLS certificates (Let's Encrypt recommended)
+- [ ] Update Grafana admin password
+- [ ] Configure Alertmanager email notifications
+- [ ] Set up automated backups (run `./scripts/setup-cron.sh`)
+- [ ] Verify rate limiting is working
+- [ ] Review and update CORS origins
+
+**See the full security checklist in [PRE_DEPLOYMENT_CHECKLIST.md](docs/PRE_DEPLOYMENT_CHECKLIST.md)**
 
 ## Troubleshooting
 
@@ -449,21 +463,55 @@ docker-compose logs postgres | grep ERROR
 
 MIT License - see [LICENSE](LICENSE) file for details
 
+## Documentation
+
+Comprehensive documentation is included:
+
+### User Documentation
+- **[README.md](README.md)** - This file (project overview and quick start)
+- **[API.md](docs/API.md)** - Complete API reference with examples
+- **[PRIVACY_POLICY.md](PRIVACY_POLICY.md)** - Privacy policy and data handling
+
+### Deployment Documentation
+- **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** - VPS deployment walkthrough (5,500+ words)
+- **[PRE_DEPLOYMENT_CHECKLIST.md](docs/PRE_DEPLOYMENT_CHECKLIST.md)** - 80+ pre-launch verification items
+- **[OPERATIONS_GUIDE.md](docs/OPERATIONS_GUIDE.md)** - Daily operations and maintenance (4,000+ words)
+
+### Monitoring Documentation
+- **[MONITORING_GUIDE.md](docs/MONITORING_GUIDE.md)** - Complete monitoring guide (7,000+ words)
+- **[POST_LAUNCH_MONITORING.md](POST_LAUNCH_MONITORING.md)** - Post-launch monitoring plan
+
+### Technical Documentation
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Testing strategy and execution
+- **[TEST_COVERAGE_FINAL_REPORT.md](docs/TEST_COVERAGE_FINAL_REPORT.md)** - Complete coverage analysis
+- **[API_INTEGRATION_GUIDE.md](docs/API_INTEGRATION_GUIDE.md)** - Integration guide for website developers
+- **[TYPESCRIPT_TYPES.md](docs/TYPESCRIPT_TYPES.md)** - TypeScript type definitions guide
+- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** - Detailed implementation roadmap
+
+### Phase Completion Reports
+- **[PHASE_6_COMPLETION_REPORT.md](PHASE_6_COMPLETION_REPORT.md)** - Deployment & Infrastructure
+- **[PHASE_7_COMPLETION_REPORT.md](PHASE_7_COMPLETION_REPORT.md)** - Monitoring & Observability
+- **[PHASE_9_COMPLETION_REPORT.md](PHASE_9_COMPLETION_REPORT.md)** - Launch Preparation
+
 ## Links
 
-- [Weather MCP Server](https://github.com/weather-mcp/mcp-server)
-- [Website](https://weather-mcp.dev)
-- [Dashboard](https://weather-mcp.dev/dashboard)
-- [Implementation Plan](./IMPLEMENTATION_PLAN.md)
+- **GitHub Organization**: https://github.com/weather-mcp
+- **Weather MCP Server**: https://github.com/weather-mcp/mcp-server
+- **Analytics Server**: https://github.com/weather-mcp/analytics-server
+- **Website**: https://github.com/weather-mcp/website
+- **Public Dashboard**: https://weather-mcp.dev/dashboard *(coming soon)*
 
 ## Support
 
 For issues and questions:
-- GitHub Issues: https://github.com/weather-mcp/analytics-server/issues
-- MCP Server Issues: https://github.com/weather-mcp/mcp-server/issues
+- **Analytics Server Issues**: https://github.com/weather-mcp/analytics-server/issues
+- **MCP Server Issues**: https://github.com/weather-mcp/mcp-server/issues
+- **General Questions**: https://github.com/weather-mcp/.github/discussions
 
 ---
 
-**Status**: ✅ Production Ready
+**Status**: ✅ Production Ready (Phase 9 Complete)
 
-Last Updated: 2025-11-12
+**Last Updated**: 2025-01-13
+**Version**: 1.0.0
+**Test Coverage**: 86-100% on critical modules (266 tests passing)
