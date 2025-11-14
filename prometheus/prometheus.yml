@@ -1,0 +1,66 @@
+# Prometheus configuration for Analytics Server
+# Collects metrics from API and Worker services
+
+global:
+  scrape_interval: 15s # Scrape targets every 15 seconds
+  evaluation_interval: 15s # Evaluate rules every 15 seconds
+
+  # Attach these labels to any time series or alerts when communicating with
+  # external systems (federation, remote storage, Alertmanager).
+  external_labels:
+    cluster: 'analytics-server'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "alert_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Scrape Analytics API server
+  - job_name: 'analytics-api'
+    scrape_interval: 10s # More frequent scraping for API
+    static_configs:
+      - targets: ['api:3000']
+        labels:
+          service: 'api'
+          component: 'analytics-server'
+    metrics_path: '/metrics'
+
+  # Scrape PostgreSQL Exporter (if added)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgres'
+          component: 'database'
+
+  # Scrape Redis Exporter (if added)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+          component: 'queue'
+
+  # Scrape Node Exporter (if added for system metrics)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+          component: 'infrastructure'

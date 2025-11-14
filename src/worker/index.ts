@@ -6,6 +6,13 @@ import {
   updateAggregations,
   closeDatabaseConnection,
 } from '../database/index.js';
+import {
+  recordEventProcessed,
+  eventsProcessingDuration,
+  workerBatchSize,
+  workerErrors,
+  queueDepth as queueDepthGauge,
+} from '../monitoring/metrics.js';
 
 // Worker state
 let isRunning = false;
@@ -22,6 +29,8 @@ let lastProcessedAt: Date | null = null;
  * Process a batch of events from the queue
  */
 async function processBatch(): Promise<void> {
+  const startTime = Date.now();
+
   try {
     // Dequeue a batch of events
     const events = await dequeueEvents(config.queue.batchSize);
@@ -42,6 +51,9 @@ async function processBatch(): Promise<void> {
 
     processingCount++;
 
+    // Record batch size metric
+    workerBatchSize.observe(events.length);
+
     logger.info({
       count: events.length,
       queueDepth: await getQueueDepth(),
@@ -56,6 +68,7 @@ async function processBatch(): Promise<void> {
         error: insertError,
         count: events.length,
       }, 'Failed to insert events');
+      workerErrors.inc({ error_type: 'database_insert' });
       throw insertError;
     }
 
@@ -68,6 +81,7 @@ async function processBatch(): Promise<void> {
         error: aggError,
         count: events.length,
       }, 'Failed to update aggregations');
+      workerErrors.inc({ error_type: 'aggregation_update' });
       // Don't throw - aggregations can be rebuilt later if needed
     }
 
@@ -75,14 +89,23 @@ async function processBatch(): Promise<void> {
     totalProcessed += events.length;
     lastProcessedAt = new Date();
 
+    // Record successful processing
+    recordEventProcessed('success', events.length);
+
+    // Record processing duration
+    const durationSeconds = (Date.now() - startTime) / 1000;
+    eventsProcessingDuration.observe(durationSeconds);
+
     logger.info({
       batchSize: events.length,
       totalProcessed,
       queueDepth: await getQueueDepth(),
+      durationMs: Date.now() - startTime,
     }, 'Batch processed successfully');
 
   } catch (error) {
     totalErrors++;
+    workerErrors.inc({ error_type: 'batch_processing' });
     logger.error({
       error,
       totalErrors,
@@ -245,9 +268,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       queueDepth: 'pending', // Will be fetched async
     }, 'Worker statistics');
 
-    // Async fetch queue depth for next log
+    // Async fetch queue depth for metrics and logging
     getQueueDepth()
       .then((depth) => {
+        queueDepthGauge.set(depth); // Update Prometheus gauge
         logger.debug({ queueDepth: depth }, 'Current queue depth');
       })
       .catch((error) => {

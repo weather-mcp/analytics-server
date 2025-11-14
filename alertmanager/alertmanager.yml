@@ -1,0 +1,148 @@
+# Alertmanager configuration for Analytics Server
+# Handles alert routing, grouping, and notification
+
+global:
+  # Default SMTP configuration for email alerts
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'analytics-alerts@your-domain.com'
+  smtp_auth_username: 'your-email@gmail.com'
+  smtp_auth_password: 'your-app-password'
+  smtp_require_tls: true
+
+  # Slack webhook URL (optional)
+  # slack_api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+
+# The root route with all parameters, which are inherited by the child routes
+route:
+  # Group alerts by alertname, cluster, and service
+  group_by: ['alertname', 'cluster', 'service']
+
+  # When a new group of alerts is created by an incoming alert, wait at
+  # least 'group_wait' to send the initial notification.
+  group_wait: 10s
+
+  # When the first notification was sent, wait 'group_interval' to send a batch
+  # of new alerts that started firing for that group.
+  group_interval: 5m
+
+  # If an alert has successfully been sent, wait 'repeat_interval' to
+  # resend them.
+  repeat_interval: 3h
+
+  # Default receiver
+  receiver: 'default'
+
+  # Child routes (specific alert routing)
+  routes:
+    # Critical alerts - send immediately to all channels
+    - match:
+        severity: critical
+      receiver: 'critical'
+      group_wait: 5s
+      group_interval: 1m
+      repeat_interval: 30m
+
+    # Warning alerts - grouped and sent less frequently
+    - match:
+        severity: warning
+      receiver: 'warning'
+      group_interval: 10m
+      repeat_interval: 4h
+
+    # API-specific alerts
+    - match:
+        component: api
+      receiver: 'api-alerts'
+      continue: true # Also send to default receiver
+
+    # Database-specific alerts
+    - match:
+        component: database
+      receiver: 'database-alerts'
+      continue: true
+
+# Inhibition rules allow to mute a set of alerts given that another alert is
+# firing. We use this to mute any warning-level alerts if a critical alert
+# is already firing for the same service.
+inhibit_rules:
+  # Mute warning if critical is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service', 'component']
+
+  # Mute high error rate if API is down
+  - source_match:
+      alertname: 'APIDown'
+    target_match_re:
+      alertname: '(HighErrorRate|VeryHighErrorRate|HighResponseTime)'
+    equal: ['service']
+
+# Notification receivers
+receivers:
+  # Default receiver - basic email
+  - name: 'default'
+    email_configs:
+      - to: 'alerts@your-domain.com'
+        headers:
+          Subject: '[ANALYTICS] {{ .GroupLabels.alertname }}'
+        html: |
+          <h2>{{ .GroupLabels.alertname }}</h2>
+          <p><strong>Severity:</strong> {{ .CommonLabels.severity }}</p>
+          <p><strong>Summary:</strong> {{ .CommonAnnotations.summary }}</p>
+          <p><strong>Description:</strong> {{ .CommonAnnotations.description }}</p>
+          <p><strong>Time:</strong> {{ .StartsAt.Format "2006-01-02 15:04:05" }}</p>
+          <a href="{{ .ExternalURL }}">View in Alertmanager</a>
+
+  # Critical alerts - multiple channels
+  - name: 'critical'
+    email_configs:
+      - to: 'oncall@your-domain.com'
+        headers:
+          Subject: '[CRITICAL] {{ .GroupLabels.alertname }}'
+          Priority: '1' # High priority
+        html: |
+          <h1 style="color: red;">CRITICAL ALERT</h1>
+          <h2>{{ .GroupLabels.alertname }}</h2>
+          <p><strong>Summary:</strong> {{ .CommonAnnotations.summary }}</p>
+          <p><strong>Description:</strong> {{ .CommonAnnotations.description }}</p>
+          <p><strong>Component:</strong> {{ .CommonLabels.component }}</p>
+          <p><strong>Time:</strong> {{ .StartsAt.Format "2006-01-02 15:04:05" }}</p>
+          <a href="{{ .ExternalURL }}">View in Alertmanager</a>
+    # Uncomment to enable Slack notifications
+    # slack_configs:
+    #   - channel: '#analytics-critical'
+    #     title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+    #     text: |
+    #       {{ range .Alerts }}
+    #       *Alert:* {{ .Labels.alertname }}
+    #       *Summary:* {{ .Annotations.summary }}
+    #       *Description:* {{ .Annotations.description }}
+    #       *Component:* {{ .Labels.component }}
+    #       {{ end }}
+
+  # Warning alerts
+  - name: 'warning'
+    email_configs:
+      - to: 'warnings@your-domain.com'
+        headers:
+          Subject: '[WARNING] {{ .GroupLabels.alertname }}'
+
+  # API-specific alerts
+  - name: 'api-alerts'
+    email_configs:
+      - to: 'api-team@your-domain.com'
+        headers:
+          Subject: '[API] {{ .GroupLabels.alertname }}'
+
+  # Database-specific alerts
+  - name: 'database-alerts'
+    email_configs:
+      - to: 'dba-team@your-domain.com'
+        headers:
+          Subject: '[DATABASE] {{ .GroupLabels.alertname }}'
+
+# Templates for custom notification formatting (optional)
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'

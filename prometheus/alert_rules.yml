@@ -1,0 +1,210 @@
+# Alert Rules for Analytics Server
+# Defines conditions that trigger alerts to Alertmanager
+
+groups:
+  # API Health Alerts
+  - name: api_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_requests_total[5m])) by (service)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API error rate detected"
+          description: "Service {{ $labels.service }} has an error rate of {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      - alert: VeryHighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_requests_total[5m])) by (service)
+          ) > 0.10
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Very high API error rate detected"
+          description: "Service {{ $labels.service }} has an error rate of {{ $value | humanizePercentage }} (threshold: 10%)"
+
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API response time"
+          description: "95th percentile response time is {{ $value }}s (threshold: 1s)"
+
+      - alert: APIDown
+        expr: up{job="analytics-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Analytics API is down"
+          description: "The Analytics API service has been down for more than 1 minute"
+
+  # Queue Alerts
+  - name: queue_alerts
+    interval: 30s
+    rules:
+      - alert: QueueBacklog
+        expr: queue_depth > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "Event queue backlog detected"
+          description: "Queue depth is {{ $value }} events (threshold: 1000). Worker may be falling behind."
+
+      - alert: CriticalQueueBacklog
+        expr: queue_depth > 5000
+        for: 2m
+        labels:
+          severity: critical
+          component: queue
+        annotations:
+          summary: "Critical event queue backlog"
+          description: "Queue depth is {{ $value }} events (threshold: 5000). Immediate action required."
+
+      - alert: QueueNearCapacity
+        expr: queue_depth > 9000
+        for: 1m
+        labels:
+          severity: critical
+          component: queue
+        annotations:
+          summary: "Queue near capacity"
+          description: "Queue depth is {{ $value }} events, approaching max capacity of 10000"
+
+  # Worker Alerts
+  - name: worker_alerts
+    interval: 30s
+    rules:
+      - alert: HighWorkerErrorRate
+        expr: |
+          rate(worker_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: worker
+        annotations:
+          summary: "High worker error rate"
+          description: "Worker is experiencing {{ $value }} errors per second"
+
+      - alert: WorkerProcessingStalled
+        expr: |
+          rate(events_processed_total[5m]) == 0 and queue_depth > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: worker
+        annotations:
+          summary: "Worker processing stalled"
+          description: "Worker has not processed any events in 5 minutes despite queue having {{ $value }} events"
+
+  # Database Alerts
+  - name: database_alerts
+    interval: 30s
+    rules:
+      - alert: HighDatabaseConnections
+        expr: database_connection_pool{state="total"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} connections (threshold: 80)"
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: database_connection_pool{state="waiting"} > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection pool exhausted"
+          description: "{{ $value }} connections are waiting for an available database connection"
+
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95, rate(database_query_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile query duration is {{ $value }}s (threshold: 1s)"
+
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database is down"
+          description: "PostgreSQL database has been unreachable for more than 1 minute"
+
+  # System Resource Alerts
+  - name: resource_alerts
+    interval: 30s
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes / 1024 / 1024
+          ) > 400
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "Service {{ $labels.job }} is using {{ $value }}MB of memory (threshold: 400MB)"
+
+      - alert: CriticalMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes / 1024 / 1024
+          ) > 450
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical memory usage"
+          description: "Service {{ $labels.job }} is using {{ $value }}MB of memory (threshold: 450MB)"
+
+  # Data Freshness Alerts
+  - name: data_freshness_alerts
+    interval: 1m
+    rules:
+      - alert: StaleDataWarning
+        expr: |
+          time() - (
+            max(timestamp(events_received_total))
+          ) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: data
+        annotations:
+          summary: "No events received recently"
+          description: "No analytics events have been received in the last {{ $value }}s (threshold: 300s)"
