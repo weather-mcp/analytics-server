@@ -2,17 +2,36 @@
 
 Quick reference for common operational tasks on the Analytics Server.
 
+**📖 Related Guides:**
+- [Cloudflare Tunnel Deployment](CLOUDFLARE_TUNNEL_DEPLOYMENT.md) - Full deployment with Cloudflare Tunnel
+- [Traditional Deployment](DEPLOYMENT_GUIDE.md) - Traditional nginx deployment
+- [Environment Configuration](ENVIRONMENT_CONFIG.md) - Environment variables reference
+
+---
+
+## Deployment Method
+
+This guide covers operations for **both deployment methods**:
+- **Cloudflare Tunnel** (Recommended) - See Cloudflare-specific sections
+- **Traditional Nginx** - Standard Docker Compose operations
+
+Operations are marked with:
+- 🔵 **All Methods** - Applies to both deployment strategies
+- ⚡ **Cloudflare Tunnel** - Specific to Cloudflare Tunnel deployments
+- 📦 **Traditional** - Specific to traditional nginx deployments
+
 ---
 
 ## Table of Contents
 
 1. [Daily Operations](#daily-operations)
 2. [Service Management](#service-management)
-3. [Monitoring](#monitoring)
-4. [Backup and Restore](#backup-and-restore)
-5. [Troubleshooting](#troubleshooting)
-6. [Performance Tuning](#performance-tuning)
-7. [Security Maintenance](#security-maintenance)
+3. [Cloudflare Tunnel Operations](#cloudflare-tunnel-operations) ⚡
+4. [Monitoring](#monitoring)
+5. [Backup and Restore](#backup-and-restore)
+6. [Troubleshooting](#troubleshooting)
+7. [Performance Tuning](#performance-tuning)
+8. [Security Maintenance](#security-maintenance)
 
 ---
 
@@ -146,7 +165,231 @@ docker compose up -d --scale worker=1
 
 ---
 
+## Cloudflare Tunnel Operations
+
+⚡ **These operations are specific to Cloudflare Tunnel deployments.**
+
+For traditional deployments, skip to [Monitoring](#monitoring).
+
+### Check Tunnel Status
+
+```bash
+# Check tunnel service status
+sudo systemctl status cloudflared
+
+# View tunnel logs (real-time)
+sudo journalctl -u cloudflared -f
+
+# View last 50 log lines
+sudo journalctl -u cloudflared -n 50
+
+# Check tunnel connectivity
+cloudflared tunnel info weather-mcp-analytics
+
+# List all tunnels
+cloudflared tunnel list
+```
+
+### Manage Tunnel Service
+
+```bash
+# Start tunnel
+sudo systemctl start cloudflared
+
+# Stop tunnel
+sudo systemctl stop cloudflared
+
+# Restart tunnel
+sudo systemctl restart cloudflared
+
+# Enable on boot
+sudo systemctl enable cloudflared
+
+# Disable on boot
+sudo systemctl disable cloudflared
+
+# View service configuration
+sudo systemctl cat cloudflared
+```
+
+### Check Application Services (Cloudflare Tunnel)
+
+```bash
+# Check API service
+sudo systemctl status analytics-api
+
+# Check worker service
+sudo systemctl status analytics-worker
+
+# View API logs
+sudo journalctl -u analytics-api -f
+
+# View worker logs
+sudo journalctl -u analytics-worker -f
+
+# Check all services at once
+systemctl status analytics-api analytics-worker cloudflared
+```
+
+### Restart Application (Cloudflare Tunnel)
+
+```bash
+# Restart API
+sudo systemctl restart analytics-api
+
+# Restart worker
+sudo systemctl restart analytics-worker
+
+# Restart tunnel
+sudo systemctl restart cloudflared
+
+# Restart all services
+sudo systemctl restart analytics-api analytics-worker cloudflared
+
+# Check status after restart
+systemctl is-active analytics-api analytics-worker cloudflared
+```
+
+### Update Application (Cloudflare Tunnel)
+
+```bash
+# 1. Pull latest code
+cd /opt/weather-mcp/analytics-server
+git pull
+
+# 2. Install dependencies
+npm install
+
+# 3. Build application
+npm run build
+
+# 4. Run database migrations (if any)
+npm run db:migrate
+
+# 5. Restart services
+sudo systemctl restart analytics-api analytics-worker
+
+# 6. Verify health
+curl https://analytics.weather-mcp.dev/health
+
+# 7. Check for errors
+sudo journalctl -u analytics-api -n 50
+sudo journalctl -u analytics-worker -n 50
+```
+
+### Test Tunnel Connectivity
+
+```bash
+# Test local API (should work)
+curl http://localhost:3000/health
+
+# Test via tunnel (should work)
+curl https://analytics.weather-mcp.dev/health
+
+# Check DNS resolution
+dig analytics.weather-mcp.dev
+
+# Trace route (will show Cloudflare IPs)
+traceroute analytics.weather-mcp.dev
+
+# Check SSL certificate
+echo | openssl s_client -connect analytics.weather-mcp.dev:443 -servername analytics.weather-mcp.dev 2>/dev/null | openssl x509 -noout -text
+```
+
+### View Tunnel Metrics in Cloudflare Dashboard
+
+1. Go to https://one.dash.cloudflare.com/
+2. Navigate to **Zero Trust** → **Networks** → **Tunnels**
+3. Click on **weather-mcp-analytics**
+4. View metrics: requests, bandwidth, uptime, health checks
+
+### Troubleshoot Tunnel Issues
+
+```bash
+# Tunnel not connecting
+sudo systemctl restart cloudflared
+sudo journalctl -u cloudflared -n 100
+
+# API not responding through tunnel
+# 1. Check API is running locally
+curl http://localhost:3000/health
+
+# 2. Check tunnel service
+sudo systemctl status cloudflared
+
+# 3. Check tunnel logs for errors
+sudo journalctl -u cloudflared | grep -i error
+
+# 4. Restart tunnel
+sudo systemctl restart cloudflared
+
+# DNS not resolving
+cloudflared tunnel route dns weather-mcp-analytics analytics.weather-mcp.dev
+
+# Check firewall (should only have port 22 open)
+sudo ufw status verbose
+```
+
+### Update Cloudflared
+
+```bash
+# Check current version
+cloudflared --version
+
+# Download latest version
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+
+# Install update
+sudo dpkg -i cloudflared-linux-amd64.deb
+
+# Restart tunnel service
+sudo systemctl restart cloudflared
+
+# Verify new version
+cloudflared --version
+```
+
+### Modify Tunnel Configuration
+
+```bash
+# Edit tunnel config
+nano ~/.cloudflared/config.yml
+
+# Example: Change service port
+# Change: service: http://localhost:3000
+# To:     service: http://localhost:8080
+
+# Validate configuration (if available)
+cloudflared tunnel ingress validate
+
+# Restart tunnel to apply changes
+sudo systemctl restart cloudflared
+
+# Check for errors
+sudo journalctl -u cloudflared -n 50
+```
+
+### Emergency: Disable Tunnel Temporarily
+
+```bash
+# Stop tunnel (API will be inaccessible externally)
+sudo systemctl stop cloudflared
+
+# API still accessible locally
+curl http://localhost:3000/health
+
+# Re-enable tunnel
+sudo systemctl start cloudflared
+
+# Verify tunnel is working
+curl https://analytics.weather-mcp.dev/health
+```
+
+---
+
 ## Monitoring
+
+🔵 **Applies to all deployment methods**
 
 ### Check System Metrics
 

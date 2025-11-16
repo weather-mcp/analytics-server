@@ -6,10 +6,32 @@ Use this checklist before deploying the Analytics Server to production.
 **Deployed By:** _______________
 **Server IP:** _______________
 **Domain:** _______________
+**Deployment Method:** [ ] Cloudflare Tunnel (Recommended) [ ] Traditional Nginx
 
 ---
 
-## 📋 Pre-Deployment Requirements
+## 🚀 Deployment Method Selection
+
+**Choose your deployment strategy before proceeding:**
+
+### Option A: Cloudflare Tunnel (Recommended) ⭐
+- ✅ Maximum security (no exposed ports)
+- ✅ Automatic SSL/TLS
+- ✅ DDoS protection included
+- ✅ Simplified setup (1-2 hours)
+- **Full Guide:** [CLOUDFLARE_TUNNEL_DEPLOYMENT.md](CLOUDFLARE_TUNNEL_DEPLOYMENT.md)
+- **Use Section:** [Cloudflare Tunnel Deployment Checklist](#cloudflare-tunnel-deployment-checklist)
+
+### Option B: Traditional Nginx
+- Manual SSL management
+- Open ports 80/443 required
+- More complex setup (2-3 hours)
+- **Full Guide:** [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
+- **Use Section:** [Traditional Deployment Checklist](#traditional-deployment-checklist)
+
+---
+
+## 📋 Pre-Deployment Requirements (All Methods)
 
 ### Infrastructure
 
@@ -21,18 +43,25 @@ Use this checklist before deploying the Analytics Server to production.
 
 - [ ] **Domain Configured**
   - Domain: _______________
-  - DNS A Record points to VPS IP
+  - DNS managed by Cloudflare (if using Cloudflare Tunnel)
+  - DNS A Record points to VPS IP (if using Traditional)
   - DNS propagated (check: `nslookup analytics.weather-mcp.dev`)
+
+- [ ] **Cloudflare Account** (if using Cloudflare Tunnel)
+  - Cloudflare account created
+  - Domain added to Cloudflare
+  - Nameservers updated to Cloudflare
+  - Cloudflare DNS active
 
 - [ ] **SSH Access Configured**
   - SSH key generated and added to server
   - Non-root user created: `analytics`
   - Can connect: `ssh analytics@SERVER_IP`
+  - Your local IP address noted: _______________
 
 - [ ] **Firewall Configured**
-  - Port 22 (SSH) open
-  - Port 80 (HTTP) open
-  - Port 443 (HTTPS) open
+  - **Cloudflare Tunnel:** Only port 22 (SSH) open
+  - **Traditional:** Ports 22 (SSH), 80 (HTTP), 443 (HTTPS) open
   - PostgreSQL (5432) NOT exposed publicly
   - Redis (6379) NOT exposed publicly
 
@@ -64,8 +93,11 @@ Use this checklist before deploying the Analytics Server to production.
 
 ### SSL Certificates
 
+**Cloudflare Tunnel:** ✅ SSL managed automatically by Cloudflare (skip this section)
+
+**Traditional Deployment:**
 - [ ] **SSL Certificate Obtained**
-  - Method: [ ] Let's Encrypt [ ] Cloudflare [ ] Other: _______________
+  - Method: [ ] Let's Encrypt [ ] Cloudflare Origin [ ] Other: _______________
   - Certificate files in `nginx/ssl/`
   - `fullchain.pem` present
   - `privkey.pem` present (permissions 600)
@@ -91,7 +123,95 @@ Use this checklist before deploying the Analytics Server to production.
 
 ---
 
-## 🚀 Deployment Checklist
+## 🚀 Cloudflare Tunnel Deployment Checklist
+
+**Use this checklist if deploying with Cloudflare Tunnel (Recommended)**
+
+See [CLOUDFLARE_TUNNEL_DEPLOYMENT.md](CLOUDFLARE_TUNNEL_DEPLOYMENT.md) for detailed instructions.
+
+### Phase 1: Initial Server Setup
+
+- [ ] Connect to server via SSH
+- [ ] Update system packages (`apt-get update && upgrade`)
+- [ ] Install Node.js 20.x
+- [ ] Install Docker and Docker Compose
+- [ ] Clone repository to `/opt/weather-mcp/analytics-server`
+- [ ] Create and configure `.env` file (HOST=127.0.0.1)
+- [ ] Set file permissions (`chmod 600 .env`)
+
+### Phase 2: Firewall Configuration
+
+- [ ] Run firewall setup script: `sudo ./scripts/setup-firewall.sh YOUR_IP`
+- [ ] Verify SSH still works from your IP
+- [ ] Confirm only port 22 is open (`sudo ufw status`)
+- [ ] Verify ports 80/443 are CLOSED (Cloudflare Tunnel will handle)
+
+### Phase 3: Infrastructure Services
+
+- [ ] Start PostgreSQL and Redis: `docker-compose up -d postgres redis`
+- [ ] Wait for services to be healthy
+- [ ] Run database initialization: `npm run db:init`
+- [ ] Verify tables created (5 tables expected)
+- [ ] Verify TimescaleDB extension enabled
+
+### Phase 4: Cloudflare Tunnel Setup
+
+- [ ] Run tunnel setup script: `sudo ./scripts/setup-cloudflare-tunnel.sh`
+- [ ] Authenticate with Cloudflare (browser window)
+- [ ] Verify tunnel created: `cloudflared tunnel list`
+- [ ] Verify DNS configured: `dig analytics.weather-mcp.dev`
+- [ ] Check tunnel service running: `sudo systemctl status cloudflared`
+- [ ] View tunnel logs: `sudo journalctl -u cloudflared -n 50`
+
+### Phase 5: Application Deployment
+
+- [ ] Install dependencies: `npm install`
+- [ ] Build application: `npm run build`
+- [ ] Create systemd service for API (see deployment guide)
+- [ ] Create systemd service for worker (see deployment guide)
+- [ ] Start API service: `sudo systemctl start analytics-api`
+- [ ] Start worker service: `sudo systemctl start analytics-worker`
+- [ ] Enable services on boot: `sudo systemctl enable analytics-api analytics-worker`
+
+### Phase 6: Verification
+
+- [ ] Health endpoint accessible: `curl https://analytics.weather-mcp.dev/health`
+- [ ] API returns valid JSON
+- [ ] Stats endpoints working
+- [ ] SSL certificate valid (check in browser - should show Cloudflare cert)
+- [ ] No errors in API logs: `sudo journalctl -u analytics-api -n 50`
+- [ ] No errors in worker logs: `sudo journalctl -u analytics-worker -n 50`
+- [ ] No errors in tunnel logs: `sudo journalctl -u cloudflared -n 50`
+- [ ] Rate limiting working (test with rapid requests)
+- [ ] CORS headers present
+
+### Phase 7: Monitoring Setup
+
+- [ ] Start Prometheus: `docker-compose up -d prometheus`
+- [ ] Start Grafana: `docker-compose up -d grafana`
+- [ ] Configure Grafana dashboards (optional - for ops monitoring)
+- [ ] Verify metrics endpoint: `curl http://localhost:9090/metrics`
+- [ ] Set up health check monitoring in Cloudflare dashboard
+
+### Phase 8: Post-Deployment
+
+- [ ] Monitor logs for first hour
+- [ ] Test all API endpoints
+- [ ] Verify data being written to database
+- [ ] Check worker processing queue
+- [ ] Monitor resource usage (CPU, RAM, disk)
+- [ ] Test from multiple locations
+- [ ] Document deployment details
+
+**Cloudflare Tunnel Deployment Complete!** ✅
+
+---
+
+## 🚀 Traditional Deployment Checklist
+
+**Use this checklist if deploying with Traditional Nginx setup**
+
+See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed instructions.
 
 ### Phase 1: Infrastructure Setup
 

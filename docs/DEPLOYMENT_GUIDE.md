@@ -5,11 +5,68 @@ Complete guide for deploying the Weather MCP Analytics Server to production.
 **Target Environment:** Ubuntu 22.04 LTS on a VPS (DigitalOcean, Linode, Hetzner, etc.)
 **Minimum Requirements:** 1 GB RAM, 25 GB SSD, 1 vCPU
 **Recommended:** 2 GB RAM, 50 GB SSD, 2 vCPUs
-**Estimated Time:** 2-3 hours for first-time deployment
 
 ---
 
-## Table of Contents
+## 🚀 Choose Your Deployment Strategy
+
+We offer **two deployment strategies** with different security and complexity trade-offs:
+
+### Option A: Cloudflare Tunnel (Recommended) ⭐
+
+**Security-first deployment with zero exposed ports**
+
+- ✅ **No open ports** (80/443) on your server
+- ✅ **Automatic DDoS protection** via Cloudflare's edge network
+- ✅ **Automatic SSL/TLS** certificate management
+- ✅ **Hidden server IP** - attackers can't find your server
+- ✅ **Simplified firewall** - only SSH needs to be open
+- ⏱️ **Deployment Time:** 1-2 hours
+
+**Best for:** Production deployments, security-conscious users, teams wanting minimal maintenance
+
+**📖 Full Guide:** [CLOUDFLARE_TUNNEL_DEPLOYMENT.md](CLOUDFLARE_TUNNEL_DEPLOYMENT.md)
+
+### Option B: Traditional Nginx Deployment
+
+**Classic reverse proxy setup with manual SSL management**
+
+- ⚠️ Requires **open ports 80/443** on server
+- ⚠️ **Manual SSL** certificate management (Let's Encrypt)
+- ⚠️ **Public IP exposure** - visible to attackers
+- ⚠️ **Complex firewall** rules needed
+- ⏱️ **Deployment Time:** 2-3 hours
+
+**Best for:** Users who need direct server access, environments without Cloudflare
+
+**📖 Guide:** This document (below)
+
+---
+
+## 📊 Quick Comparison
+
+| Feature | Cloudflare Tunnel ⭐ | Traditional Nginx |
+|---------|---------------------|-------------------|
+| Open Ports | SSH only (22) | SSH (22), HTTP (80), HTTPS (443) |
+| SSL Setup | Automatic | Manual (certbot) |
+| DDoS Protection | Included | Requires separate service |
+| IP Exposure | Hidden | Public |
+| Firewall Complexity | Minimal (UFW basic) | Extensive (port rules) |
+| Maintenance | Low | Medium |
+| Setup Time | 1-2 hours | 2-3 hours |
+| Recommended | ✅ Yes | For specific use cases |
+
+---
+
+## 🎯 Quick Start Links
+
+- **[Cloudflare Tunnel Deployment →](CLOUDFLARE_TUNNEL_DEPLOYMENT.md)** - Full security-first guide
+- **[Environment Configuration →](ENVIRONMENT_CONFIG.md)** - Complete environment variable reference
+- **[Traditional Deployment ↓](#table-of-contents)** - Continue reading below for nginx setup
+
+---
+
+## Table of Contents (Traditional Nginx Deployment)
 
 1. [Prerequisites](#prerequisites)
 2. [VPS Provisioning](#vps-provisioning)
