@@ -1,0 +1,74 @@
+# Cloudflare Tunnel Configuration Template
+# Weather MCP Analytics Server
+#
+# This is a template file. The setup script will populate the values.
+# Manual configuration: Copy to ~/.cloudflared/config.yml and replace placeholders
+
+# Tunnel identifier (UUID)
+tunnel: TUNNEL_ID_PLACEHOLDER
+
+# Path to tunnel credentials
+credentials-file: CREDENTIALS_FILE_PLACEHOLDER
+
+# Ingress rules define how traffic is routed
+# Rules are evaluated top-to-bottom; first match wins
+ingress:
+  # Analytics API (main service)
+  - hostname: analytics.weather-mcp.dev
+    service: http://localhost:3000
+    originRequest:
+      # Don't verify TLS for localhost
+      noTLSVerify: true
+      # Connection timeout
+      connectTimeout: 30s
+      # Pass the original hostname
+      httpHostHeader: analytics.weather-mcp.dev
+      # Disable HTTP/2 if needed
+      # disableChunkedEncoding: true
+
+  # Optional: SSH access through tunnel (uncomment to enable)
+  # - hostname: ssh.weather-mcp.dev
+  #   service: ssh://localhost:22
+
+  # Optional: Metrics endpoint (internal monitoring)
+  # - hostname: metrics.weather-mcp.dev
+  #   service: http://localhost:9090
+
+  # Catch-all rule (required as last rule)
+  - service: http_status:404
+
+# Logging configuration
+loglevel: info  # Options: debug, info, warn, error, fatal
+
+# Optional: Metrics for monitoring tunnel health
+# metrics: localhost:2000
+
+# Optional: Auto-update cloudflared
+# autoupdate-freq: 24h
+
+# Optional: Protocol (auto, quic, http2)
+# protocol: auto
+
+# Optional: Connection settings
+# retries: 5
+# grace-period: 30s
+# compression-quality: 0  # 0-11, higher = better compression but slower
+
+# Optional: Origin certificate (for mutual TLS)
+# originCert: /path/to/origin-cert.pem
+
+# Optional: Enable metrics server
+# metrics: 127.0.0.1:2000
+
+# Advanced: Custom headers
+# ingress:
+#   - hostname: analytics.weather-mcp.dev
+#     service: http://localhost:3000
+#     originRequest:
+#       httpHostHeader: analytics.weather-mcp.dev
+#       originServerName: analytics.weather-mcp.dev
+#       caPool: /path/to/ca-pool.pem
+#       connectTimeout: 30s
+#       tlsTimeout: 10s
+#       keepAliveConnections: 100
+#       keepAliveTimeout: 90s

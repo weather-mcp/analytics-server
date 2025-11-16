@@ -400,6 +400,106 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 **See the full security checklist in [PRE_DEPLOYMENT_CHECKLIST.md](docs/PRE_DEPLOYMENT_CHECKLIST.md)**
 
+## Secure Deployment with Cloudflare Tunnel
+
+For enhanced security, you can deploy the analytics server using **Cloudflare Tunnel**, which provides secure access without exposing any ports to the internet.
+
+### Security Benefits
+
+✅ **No open ports** (80/443) on the server - all ports closed except SSH
+✅ **DDoS protection** at Cloudflare's edge network
+✅ **Automatic SSL/TLS** certificate management
+✅ **No direct IP exposure** - attackers can't discover your server
+✅ **Outbound-only connections** - server initiates connection to Cloudflare
+✅ **Free for unlimited bandwidth**
+
+### Architecture
+
+```
+User → Cloudflare Edge → Cloudflare Tunnel → Analytics API (localhost only)
+```
+
+Your server has no publicly accessible ports. Cloudflare Tunnel creates an encrypted, outbound-only connection to Cloudflare's edge network, which then routes HTTPS traffic to your local API server.
+
+### Quick Setup
+
+We provide automated scripts for easy Cloudflare Tunnel deployment:
+
+```bash
+# 1. Configure firewall (blocks all ports except SSH)
+sudo ./scripts/setup-firewall.sh YOUR_IP_ADDRESS
+
+# 2. Install and configure Cloudflare Tunnel
+sudo ./scripts/setup-cloudflare-tunnel.sh
+
+# 3. Start your API server (listens on localhost only)
+npm run build
+node dist/api/index.js
+```
+
+### Deployment Options
+
+**Option A: Direct Cloudflare Tunnel** (Simplest)
+```
+Cloudflare → Tunnel → API (localhost:3000)
+```
+
+**Option B: Cloudflare Tunnel + Nginx** (Advanced)
+```
+Cloudflare → Tunnel → Nginx (localhost:8080) → API (localhost:3000)
+```
+Adds rate limiting, caching, and additional security headers.
+
+### Complete Documentation
+
+For full deployment instructions, see:
+- **[CLOUDFLARE_TUNNEL_DEPLOYMENT.md](docs/CLOUDFLARE_TUNNEL_DEPLOYMENT.md)** - Complete step-by-step guide
+- **[ENVIRONMENT_CONFIG.md](docs/ENVIRONMENT_CONFIG.md)** - Environment variable reference
+
+### Cloudflare Tunnel vs Traditional Deployment
+
+| Feature | Cloudflare Tunnel | Traditional Nginx |
+|---------|-------------------|-------------------|
+| Open Ports | SSH only (22) | SSH (22), HTTP (80), HTTPS (443) |
+| SSL Certificates | Automatic | Manual (Let's Encrypt) |
+| DDoS Protection | Included | Requires separate service |
+| IP Exposure | Hidden | Public IP visible |
+| Setup Complexity | Automated scripts | Manual nginx + certbot |
+| Firewall Rules | Minimal | Extensive |
+| Cost | Free | Free (but more complex) |
+
+### Prerequisites
+
+- Cloudflare account (free tier works)
+- Domain managed by Cloudflare DNS
+- Digital Ocean droplet or any VPS
+- Ubuntu 22.04 LTS or later
+
+### Configuration Files
+
+The Cloudflare Tunnel deployment includes:
+
+- `scripts/setup-cloudflare-tunnel.sh` - Automated tunnel installation
+- `scripts/setup-firewall.sh` - UFW firewall configuration
+- `nginx/cloudflare-tunnel.conf` - Optional nginx config for tunnel
+- `cloudflared-config.template.yml` - Tunnel configuration template
+- `docs/CLOUDFLARE_TUNNEL_DEPLOYMENT.md` - Complete deployment guide
+
+### Monitoring Tunnel Health
+
+```bash
+# Check tunnel status
+sudo systemctl status cloudflared
+
+# View tunnel logs
+sudo journalctl -u cloudflared -f
+
+# Test external access
+curl https://analytics.weather-mcp.dev/health
+```
+
+You can also monitor tunnel health in the Cloudflare Zero Trust dashboard.
+
 ## Troubleshooting
 
 ### Database Connection Issues
@@ -474,6 +574,8 @@ Comprehensive documentation is included:
 
 ### Deployment Documentation
 - **[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** - VPS deployment walkthrough (5,500+ words)
+- **[CLOUDFLARE_TUNNEL_DEPLOYMENT.md](docs/CLOUDFLARE_TUNNEL_DEPLOYMENT.md)** - Secure Cloudflare Tunnel deployment guide
+- **[ENVIRONMENT_CONFIG.md](docs/ENVIRONMENT_CONFIG.md)** - Complete environment variable reference
 - **[PRE_DEPLOYMENT_CHECKLIST.md](docs/PRE_DEPLOYMENT_CHECKLIST.md)** - 80+ pre-launch verification items
 - **[OPERATIONS_GUIDE.md](docs/OPERATIONS_GUIDE.md)** - Daily operations and maintenance (4,000+ words)
 
