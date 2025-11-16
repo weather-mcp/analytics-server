@@ -449,12 +449,20 @@ docker-compose logs postgres | grep ERROR
 
 MIT License - see [LICENSE](LICENSE) file for details
 
+## Documentation
+
+- **[API Reference](./docs/api-reference.md)** - Complete API documentation
+- **[Deployment Guide](./docs/deployment-guide.md)** - Production deployment instructions
+- **[Development Guide](./docs/development-guide.md)** - Developer handbook
+- **[Implementation Plan](./docs/implementation-plan.md)** - Detailed project roadmap
+- **[Implementation Status](./docs/implementation-status.md)** - Project completion summary
+- **[Project Plan](./docs/project-plan.md)** - Original project specification
+
 ## Links
 
 - [Weather MCP Server](https://github.com/weather-mcp/mcp-server)
 - [Website](https://weather-mcp.dev)
 - [Dashboard](https://weather-mcp.dev/dashboard)
-- [Implementation Plan](./IMPLEMENTATION_PLAN.md)
 
 ## Support
 
